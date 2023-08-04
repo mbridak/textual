@@ -1,41 +1,25 @@
-<!-- This is the template file for a CSS rule reference page. -->
+<!-- This is the template file for a CSS style reference page. -->
 
-# Rule-name
+# Style-name
 
-<!-- Short description of what the rule does, without syntax details or anything.
+<!-- Short description of what the style does, without syntax details or anything.
 One or two sentences is typically enough. -->
 
 ## Syntax
 
 --8<-- "docs/snippets/syntax_block_start.md"
 <!--
-Formal syntax description of the rule
-rule-name: <a href="../../css_types/type_one">&lt;type-one&gt;</a>;
+Formal syntax description of the style
+style-name: <a href="../../css_types/type_one">&lt;type-one&gt;</a>;
 -->
 --8<-- "docs/snippets/syntax_block_end.md"
 
-<!-- Description of what the rule uses the types/values for. -->
+<!-- Description of what the style uses the types/values for. -->
 
 ### Values
 
 <!--
-If this rule only needs one type, include it directly:
-
---8<-- "docs/snippets/type_syntax/only_type.md"
--->
-
-<!--
-If this rule needs two or more types:
-
-### &lt;first-type&gt;
-
---8<-- "docs/snippets/type_syntax/first_type.md"
-
-### &lt;second-type&gt;
-
---8<-- "docs/snippets/type_syntax/second_type.md"
-
-...
+For enum-like styles that don't warrant a dedicated type.
 -->
 
 ### Defaults
@@ -51,19 +35,19 @@ Short description of the first example.
 
 === "Output"
 
-    ```{.textual path="docs/examples/styles/rule.py"}
+    ```{.textual path="docs/examples/styles/style.py"}
     ```
 
-=== "rule.py"
+=== "style.py"
 
     ```py
-    --8<-- "docs/examples/styles/rule.py"
+    --8<-- "docs/examples/styles/style.py"
     ```
 
-=== "rule.css"
+=== "style.css"
 
     ```sass
-    --8<-- "docs/examples/styles/rule.css"
+    --8<-- "docs/examples/styles/style.css"
     ```
 -->
 
@@ -73,19 +57,19 @@ Short description of the second example.
 
 === "Output"
 
-    ```{.textual path="docs/examples/styles/rule.py"}
+    ```{.textual path="docs/examples/styles/style.py"}
     ```
 
-=== "rule.py"
+=== "style.py"
 
     ```py
-    --8<-- "docs/examples/styles/rule.py"
+    --8<-- "docs/examples/styles/style.py"
     ```
 
-=== "rule.css"
+=== "style.css"
 
     ```sass
-    --8<-- "docs/examples/styles/rule.css"
+    --8<-- "docs/examples/styles/style.css"
     ```
 
 -->
@@ -114,18 +98,18 @@ rule-name-variant: value4
 ## Python
 
 <!--
-The Python syntax for the rule definitions.
+The Python syntax for the style definitions.
 Copy the same examples as the ones shown in the CSS above.
 
-If the programmatic way of setting the rule differs significantly from the CSS way, make note of that here.
+If the programmatic way of setting the property differs significantly from the CSS way, make note of that here.
 
 ```py
-rule_name = value1
-rule_name = value2
-rule_name = (different_syntax_value, shown_here)
+widget.styles.property_name = value1
+widget.styles.property_name = value2
+widget.styles.property_name = (different_syntax_value, shown_here)
 
-rule_name_variant = value3
-rule_name_variant = value4
+widget.styles.property_name_variant = value3
+widget.styles.property_name_variant = value4
 ```
 
 -->

@@ -8,8 +8,7 @@ of subsequent keys.
 Note that stdlib's @lru_cache is implemented in C and faster! It's best to use
 @lru_cache where you are caching things that are fairly quick and called many times.
 Use LRUCache where you want increased flexibility and you are caching slow operations
-where the overhead of the cache is a small fraction of the total processing time.  
-
+where the overhead of the cache is a small fraction of the total processing time.
 """
 
 from __future__ import annotations
@@ -35,7 +34,6 @@ class LRUCache(Generic[CacheKey, CacheValue]):
 
     Each entry is stored as [PREV, NEXT, KEY, VALUE] where PREV is a reference
     to the previous entry, and NEXT is a reference to the next value.
-
     """
 
     __slots__ = [
@@ -72,15 +70,13 @@ class LRUCache(Generic[CacheKey, CacheValue]):
         return len(self._cache)
 
     def __repr__(self) -> str:
-        return (
-            f"<LRUCache maxsize={self._maxsize} hits={self.hits} misses={self.misses}>"
-        )
+        return f"<LRUCache size={len(self)} maxsize={self._maxsize} hits={self.hits} misses={self.misses}>"
 
     def grow(self, maxsize: int) -> None:
         """Grow the maximum size to at least `maxsize` elements.
 
         Args:
-            maxsize (int): New maximum size.
+            maxsize: New maximum size.
         """
         self.maxsize = max(self.maxsize, maxsize)
 
@@ -99,8 +95,8 @@ class LRUCache(Generic[CacheKey, CacheValue]):
         """Set a value.
 
         Args:
-            key (CacheKey): Key.
-            value (CacheValue): Value.
+            key: Key.
+            value: Value.
         """
         link = self._cache.get(key)
         if link is None:
@@ -141,11 +137,11 @@ class LRUCache(Generic[CacheKey, CacheValue]):
         """Get a value from the cache, or return a default if the key is not present.
 
         Args:
-            key (CacheKey): Key
-            default (Optional[DefaultValue], optional): Default to return if key is not present. Defaults to None.
+            key: Key
+            default: Default to return if key is not present.
 
         Returns:
-            Union[CacheValue, Optional[DefaultValue]]: Either the value or a default.
+            Either the value or a default.
         """
         link = self._cache.get(key)
         if link is None:
@@ -181,6 +177,21 @@ class LRUCache(Generic[CacheKey, CacheValue]):
     def __contains__(self, key: CacheKey) -> bool:
         return key in self._cache
 
+    def discard(self, key: CacheKey) -> None:
+        """Discard item in cache from key.
+
+        Args:
+            key: Cache key.
+        """
+        link = self._cache.get(key)
+        if link is None:
+            return
+        # Remove link from list
+        link[0][1] = link[1]  # type: ignore[index]
+        link[1][0] = link[0]  # type: ignore[index]
+        # Remove link from cache
+        del self._cache[key]
+
 
 class FIFOCache(Generic[CacheKey, CacheValue]):
     """A simple cache that discards the first added key when full (First In First Out).
@@ -190,7 +201,7 @@ class FIFOCache(Generic[CacheKey, CacheValue]):
     do many lookups.
 
     Args:
-        maxsize (int): Maximum size of the cache.
+        maxsize: Maximum size of the cache.
     """
 
     __slots__ = [
@@ -230,8 +241,8 @@ class FIFOCache(Generic[CacheKey, CacheValue]):
         """Set a value.
 
         Args:
-            key (CacheKey): Key.
-            value (CacheValue): Value.
+            key: Key.
+            value: Value.
         """
         if key not in self._cache and len(self._cache) >= self._maxsize:
             for first_key in self._cache:
@@ -255,11 +266,11 @@ class FIFOCache(Generic[CacheKey, CacheValue]):
         """Get a value from the cache, or return a default if the key is not present.
 
         Args:
-            key (CacheKey): Key
-            default (Optional[DefaultValue], optional): Default to return if key is not present. Defaults to None.
+            key: Key
+            default: Default to return if key is not present.
 
         Returns:
-            Union[CacheValue, Optional[DefaultValue]]: Either the value or a default.
+            Either the value or a default.
         """
         try:
             result = self._cache[key]

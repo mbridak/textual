@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-import asyncio
-
 try:
     import httpx
 except ImportError:
     raise ImportError("Please install httpx with 'pip install httpx' ")
 
-from rich.markdown import Markdown
 
+from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Content
-from textual.widgets import Static, Input
+from textual.containers import VerticalScroll
+from textual.widgets import Input, Markdown
 
 
 class DictionaryApp(App):
@@ -21,7 +19,8 @@ class DictionaryApp(App):
 
     def compose(self) -> ComposeResult:
         yield Input(placeholder="Search for a word")
-        yield Content(Static(id="results"), id="results-container")
+        with VerticalScroll(id="results-container"):
+            yield Markdown(id="results")
 
     def on_mount(self) -> None:
         """Called when app starts."""
@@ -31,21 +30,26 @@ class DictionaryApp(App):
     async def on_input_changed(self, message: Input.Changed) -> None:
         """A coroutine to handle a text changed message."""
         if message.value:
-            # Look up the word in the background
-            asyncio.create_task(self.lookup_word(message.value))
+            self.lookup_word(message.value)
         else:
             # Clear the results
-            self.query_one("#results", Static).update()
+            self.query_one("#results", Markdown).update("")
 
+    @work(exclusive=True)
     async def lookup_word(self, word: str) -> None:
         """Looks up a word."""
         url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}"
+
         async with httpx.AsyncClient() as client:
-            results = (await client.get(url)).json()
+            response = await client.get(url)
+            try:
+                results = response.json()
+            except Exception:
+                self.query_one("#results", Markdown).update(response.text)
 
         if word == self.query_one(Input).value:
             markdown = self.make_word_markdown(results)
-            self.query_one("#results", Static).update(Markdown(markdown))
+            self.query_one("#results", Markdown).update(markdown)
 
     def make_word_markdown(self, results: object) -> str:
         """Convert the results in to markdown."""

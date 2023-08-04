@@ -1,22 +1,18 @@
 """
-A DOMQuery is a set of DOM nodes associated with a given CSS selector.
+A DOMQuery is a set of DOM nodes returned by [query][textual.dom.DOMNode.query].
 
-This set of nodes may be further filtered with the filter method. Additional methods apply
-actions to the nodes in the query.
+The set of nodes may be further refined with [filter][textual.css.query.DOMQuery.filter] and [exclude][textual.css.query.DOMQuery.exclude].
+Additional methods apply actions to all nodes in the query.
 
-If this sounds like JQuery, a (once) popular JS library, it is no coincidence.
+!!! info
 
-DOMQuery objects are typically created by Widget.query method.
-
-Queries are *lazy*. Results will be calculated at the point you iterate over the query, or call
-a method which evaluates the query, such as first() and last().
-
+    If this sounds like JQuery, a (once) popular JS library, it is no coincidence.
 """
 
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Generic, Iterator, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Generic, Iterable, Iterator, TypeVar, cast, overload
 
 import rich.repr
 
@@ -72,7 +68,21 @@ class DOMQuery(Generic[QueryType]):
         exclude: str | None = None,
         parent: DOMQuery | None = None,
     ) -> None:
+        """Initialize a query object.
 
+        !!! warning
+
+            You won't need to construct this manually, as `DOMQuery` objects are returned by [query][textual.dom.DOMNode.query].
+
+        Args:
+            node: A DOM node.
+            filter: Query to filter children in the node.
+            exclude: Query to exclude children in the node.
+            parent: The parent query, if this is the result of filtering another query.
+
+        Raises:
+            InvalidQueryFormat: If the format of the query is invalid.
+        """
         self._node = node
         self._nodes: list[QueryType] | None = None
         self._filters: list[tuple[SelectorSet, ...]] = (
@@ -96,6 +106,7 @@ class DOMQuery(Generic[QueryType]):
 
     @property
     def node(self) -> DOMNode:
+        """The node being queried."""
         return self._node
 
     @property
@@ -142,9 +153,8 @@ class DOMQuery(Generic[QueryType]):
         return self.nodes[index]
 
     def __rich_repr__(self) -> rich.repr.Result:
-        yield self.node
         if self._filters:
-            yield "filter", " AND ".join(
+            yield "query", " AND ".join(
                 ",".join(selector.css for selector in selectors)
                 for selectors in self._filters
             )
@@ -158,10 +168,10 @@ class DOMQuery(Generic[QueryType]):
         """Filter this set by the given CSS selector.
 
         Args:
-            selector (str): A CSS selector.
+            selector: A CSS selector.
 
         Returns:
-            DOMQuery: New DOM Query.
+            New DOM Query.
         """
 
         return DOMQuery(self.node, filter=selector, parent=self)
@@ -170,10 +180,10 @@ class DOMQuery(Generic[QueryType]):
         """Exclude nodes that match a given selector.
 
         Args:
-            selector (str): A CSS selector.
+            selector: A CSS selector.
 
         Returns:
-            DOMQuery: New DOM query.
+            New DOM query.
         """
         return DOMQuery(self.node, exclude=selector, parent=self)
 
@@ -193,16 +203,17 @@ class DOMQuery(Generic[QueryType]):
         """Get the *first* matching node.
 
         Args:
-            expect_type (type[ExpectType] | None, optional): Require matched node is of this type,
-                or None for any type. Defaults to None.
+            expect_type: Require matched node is of this type,
+                or None for any type.
 
         Raises:
             WrongType: If the wrong type was found.
             NoMatches: If there are no matching nodes in the query.
 
         Returns:
-            Widget | ExpectType: The matching Widget.
+            The matching Widget.
         """
+        _rich_traceback_omit = True
         if self.nodes:
             first = self.nodes[0]
             if expect_type is not None:
@@ -228,16 +239,18 @@ class DOMQuery(Generic[QueryType]):
         """Get the *only* matching node.
 
         Args:
-            expect_type (type[ExpectType] | None, optional): Require matched node is of this type,
-                or None for any type. Defaults to None.
+            expect_type: Require matched node is of this type,
+                or None for any type.
 
         Raises:
             WrongType: If the wrong type was found.
+            NoMatches: If no node matches the query.
             TooManyMatches: If there is more than one matching node in the query.
 
         Returns:
-            Widget | ExpectType: The matching Widget.
+            The matching Widget.
         """
+        _rich_traceback_omit = True
         # Call on first to get the first item. Here we'll use all of the
         # testing and checking it provides.
         the_one = self.first(expect_type) if expect_type is not None else self.first()
@@ -255,7 +268,7 @@ class DOMQuery(Generic[QueryType]):
             # The IndexError was got, that's a good thing in this case. So
             # we return what we found.
             pass
-        return the_one
+        return cast("Widget", the_one)
 
     @overload
     def last(self) -> Widget:
@@ -271,15 +284,15 @@ class DOMQuery(Generic[QueryType]):
         """Get the *last* matching node.
 
         Args:
-            expect_type (type[ExpectType] | None, optional): Require matched node is of this type,
-                or None for any type. Defaults to None.
+            expect_type: Require matched node is of this type,
+                or None for any type.
 
         Raises:
             WrongType: If the wrong type was found.
             NoMatches: If there are no matching nodes in the query.
 
         Returns:
-            Widget | ExpectType: The matching Widget.
+            The matching Widget.
         """
         if not self.nodes:
             raise NoMatches(f"No nodes match {self!r}")
@@ -304,8 +317,8 @@ class DOMQuery(Generic[QueryType]):
         """Get query results, optionally filtered by a given type.
 
         Args:
-            filter_type (type[ExpectType] | None): A Widget class to filter results,
-                or None for no filter. Defaults to None.
+            filter_type: A Widget class to filter results,
+                or None for no filter.
 
         Yields:
             Iterator[Widget | ExpectType]: An iterator of Widget instances.
@@ -321,13 +334,32 @@ class DOMQuery(Generic[QueryType]):
         """Set the given class name(s) according to a condition.
 
         Args:
-            add (bool): Add the classes if True, otherwise remove them.
+            add: Add the classes if True, otherwise remove them.
 
         Returns:
-            DOMQuery: Self.
+            Self.
         """
         for node in self:
             node.set_class(add, *class_names)
+        return self
+
+    def set_classes(self, classes: str | Iterable[str]) -> DOMQuery[QueryType]:
+        """Set the classes on nodes to exactly the given set.
+
+        Args:
+            classes: A string of space separated classes, or an iterable of class names.
+
+        Returns:
+            Self.
+        """
+
+        if isinstance(classes, str):
+            for node in self:
+                node.set_classes(classes)
+        else:
+            class_names = list(classes)
+            for node in self:
+                node.set_classes(class_names)
         return self
 
     def add_class(self, *class_names: str) -> DOMQuery[QueryType]:
@@ -352,10 +384,10 @@ class DOMQuery(Generic[QueryType]):
         """Remove matched nodes from the DOM.
 
         Returns:
-            AwaitRemove: An awaitable object that waits for the widgets to be removed.
+            An awaitable object that waits for the widgets to be removed.
         """
         app = active_app.get()
-        await_remove = app._remove_nodes(list(self))
+        await_remove = app._remove_nodes(list(self), self._node)
         return await_remove
 
     def set_styles(
@@ -364,7 +396,7 @@ class DOMQuery(Generic[QueryType]):
         """Set styles on matched nodes.
 
         Args:
-            css (str, optional): CSS declarations to parser, or None. Defaults to None.
+            css: CSS declarations to parser, or None.
         """
         _rich_traceback_omit = True
 
@@ -386,11 +418,11 @@ class DOMQuery(Generic[QueryType]):
         """Refresh matched nodes.
 
         Args:
-            repaint (bool): Repaint node(s). defaults to True.
-            layout (bool): Layout node(s). Defaults to False.
+            repaint: Repaint node(s).
+            layout: Layout node(s).
 
         Returns:
-            DOMQuery: Query for chaining.
+            Query for chaining.
         """
         for node in self:
             node.refresh(repaint=repaint, layout=layout)

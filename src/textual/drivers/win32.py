@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import ctypes
 import msvcrt
 import sys
@@ -5,14 +7,16 @@ import threading
 from asyncio import AbstractEventLoop, run_coroutine_threadsafe
 from ctypes import Structure, Union, byref, wintypes
 from ctypes.wintypes import BOOL, CHAR, DWORD, HANDLE, SHORT, UINT, WCHAR, WORD
-from typing import IO, Callable, List, Optional
+from typing import IO, TYPE_CHECKING, Callable, List, Optional
 
-from .._types import EventTarget
 from .._xterm_parser import XTermParser
 from ..events import Event, Resize
 from ..geometry import Size
 
-KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
+if TYPE_CHECKING:
+    from ..app import App
+
+KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore
 
 # Console input modes
 ENABLE_ECHO_INPUT = 0x0004
@@ -124,13 +128,13 @@ def _set_console_mode(file: IO, mode: int) -> bool:
     """Set the console mode for a given file (stdout or stdin).
 
     Args:
-        file (IO): A file like object.
-        mode (int): New mode.
+        file: A file like object.
+        mode: New mode.
 
     Returns:
-        bool: True on success, otherwise False.
+        True on success, otherwise False.
     """
-    windows_filehandle = msvcrt.get_osfhandle(file.fileno())
+    windows_filehandle = msvcrt.get_osfhandle(file.fileno())  # type: ignore
     success = KERNEL32.SetConsoleMode(windows_filehandle, mode)
     return success
 
@@ -139,12 +143,12 @@ def _get_console_mode(file: IO) -> int:
     """Get the console mode for a given file (stdout or stdin)
 
     Args:
-        file (IO): A file-like object.
+        file: A file-like object.
 
     Returns:
-        int: The current console mode.
+        The current console mode.
     """
-    windows_filehandle = msvcrt.get_osfhandle(file.fileno())
+    windows_filehandle = msvcrt.get_osfhandle(file.fileno())  # type: ignore
     mode = wintypes.DWORD()
     KERNEL32.GetConsoleMode(windows_filehandle, ctypes.byref(mode))
     return mode.value
@@ -154,7 +158,7 @@ def enable_application_mode() -> Callable[[], None]:
     """Enable application mode.
 
     Returns:
-        Callable[[], None]: A callable that will restore terminal to previous state.
+        A callable that will restore terminal to previous state.
     """
 
     terminal_in = sys.stdin
@@ -210,21 +214,19 @@ class EventMonitor(threading.Thread):
     def __init__(
         self,
         loop: AbstractEventLoop,
-        app,
-        target: EventTarget,
+        app: App,
         exit_event: threading.Event,
         process_event: Callable[[Event], None],
     ) -> None:
         self.loop = loop
         self.app = app
-        self.target = target
         self.exit_event = exit_event
         self.process_event = process_event
         super().__init__()
 
     def run(self) -> None:
         exit_requested = self.exit_event.is_set
-        parser = XTermParser(self.target, lambda: False)
+        parser = XTermParser(lambda: False)
 
         try:
             read_count = wintypes.DWORD(0)
@@ -288,5 +290,5 @@ class EventMonitor(threading.Thread):
     def on_size_change(self, width: int, height: int) -> None:
         """Called when terminal size changes."""
         size = Size(width, height)
-        event = Resize(self.target, size, size)
-        run_coroutine_threadsafe(self.target.post_message(event), loop=self.loop)
+        event = Resize(size, size)
+        run_coroutine_threadsafe(self.app._post_message(event), loop=self.loop)

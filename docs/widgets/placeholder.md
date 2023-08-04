@@ -1,5 +1,6 @@
 # Placeholder
 
+!!! tip "Added in version 0.6.0"
 
 A widget that is meant to have no complex functionality.
 Use the placeholder widget when studying the layout of your app before having to develop your custom widgets.
@@ -33,15 +34,18 @@ The example below shows each placeholder variant.
 
 ## Reactive Attributes
 
-| Name       | Type   | Default     | Description                                        |
-| ---------- | ------ | ----------- | -------------------------------------------------- |
-| `variant`  | `str`  | `"default"` | Styling variant. One of `default`, `size`, `text`. |
+| Name      | Type  | Default     | Description                                        |
+| --------- | ----- | ----------- | -------------------------------------------------- |
+| `variant` | `str` | `"default"` | Styling variant. One of `default`, `size`, `text`. |
 
 
 ## Messages
 
 This widget sends no messages.
 
-## See Also
+---
 
-* [Placeholder](../api/placeholder.md) code reference
+
+::: textual.widgets.Placeholder
+    options:
+      heading_level: 2

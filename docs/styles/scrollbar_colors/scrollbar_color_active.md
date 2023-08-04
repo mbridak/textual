@@ -1,6 +1,6 @@
 # Scrollbar-color-active
 
-The `scrollbar-color-active` sets the color of the scrollbar when the thumb is being dragged.
+The `scrollbar-color-active` style sets the color of the scrollbar when the thumb is being dragged.
 
 ## Syntax
 
@@ -8,7 +8,7 @@ The `scrollbar-color-active` sets the color of the scrollbar when the thumb is b
 <a href="./scrollbar_color_active">scrollbar-color-active</a>: <a href="../../css_types/color">&lt;color&gt;</a> [<a href="../../css_types/percentage">&lt;percentage&gt;</a>];
 --8<-- "docs/snippets/syntax_block_end.md"
 
-`scrollbar-color-active` accepts a [`<color>`](../../../css_types/color) (with an optional transparency level defined by a [`<percentage>`](../../../css_types/percentage)) that is used to define the color of a scrollbar when its thumb is being dragged.
+`scrollbar-color-active` accepts a [`<color>`](../../../css_types/color) (with an optional opacity level defined by a [`<percentage>`](../../../css_types/percentage)) that is used to define the color of a scrollbar when its thumb is being dragged.
 
 ## Example
 

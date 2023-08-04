@@ -2,13 +2,13 @@
 
 !!! note inline end
 
-    If you don't have the `textual` command on your path, you may have forgotten to install with the `dev` switch.
+    If you don't have the `textual` command on your path, you may have forgotten to install the `textual-dev` package.
 
     See [getting started](../getting_started.md#installation) for details.
 
 Textual comes with a command line application of the same name. The `textual` command is a super useful tool that will help you to build apps.
 
-Take a moment to look through the available sub-commands. There will be even more helpful tools here in the future.
+Take a moment to look through the available subcommands. There will be even more helpful tools here in the future.
 
 ```bash
 textual --help
@@ -17,24 +17,47 @@ textual --help
 
 ## Run
 
-You can run Textual apps with the `run` subcommand. If you supply a path to a Python file it will load and run the application.
+The `run` sub-command runs Textual apps. If you supply a path to a Python file it will load and run the app.
 
 ```bash
 textual run my_app.py
 ```
 
-The `run` sub-command will first look for a `App` instance called `app` in the global scope of your Python file. If there is no `app`, it will create an instance of the first `App` class it finds and run that.
+This is equivalent to running `python my_app.py` from the command prompt, but will allow you to set various switches which can help you debug, such as `--dev` which enable the [Console](#console).
 
-Alternatively, you can add the name of an `App` instance or class after a colon to run a specific app in the Python file. Here's an example:
+See the `run` subcommand's help for details:
 
 ```bash
-textual run my_app.py:alternative_app
+textual run --help
+```
+
+You can also run Textual apps from a python import.
+The following command would import `music.play` and run a Textual app in that module:
+
+```bash
+textual run music.play
+```
+
+This assumes you have a Textual app instance called `app` in `music.play`.
+If your app has a different name, you can append it after a colon:
+
+```bash
+textual run music.play:MusicPlayerApp
 ```
 
 !!! note
 
-    If the Python file contains a call to app.run() then you can launch the file as you normally would any other Python program. Running your app via `textual run` will give you access to a few Textual features such as live editing of CSS files.
+    This works for both Textual app *instances* and *classes*.
 
+
+### Running from commands
+
+If your app is installed as a command line script, you can use the `-c` switch to run it.
+For instance, the following will run the `textual colors` command:
+
+```bash
+textual run -c textual colors
+```
 
 ## Live editing
 
@@ -60,7 +83,7 @@ textual console
 
 You should see the Textual devtools welcome message:
 
-```{.textual title="textual console" path="docs/examples/getting_started/console.py", press="_,_"}
+```{.textual title="textual console" path="docs/examples/getting_started/console.py"}
 ```
 
 In the other console, run your application with `textual run` and the `--dev` switch:
@@ -72,7 +95,7 @@ textual run --dev my_app.py
 Anything you `print` from your application will be displayed in the console window. Textual will also write log messages to this window which may be helpful when debugging your application.
 
 
-### Verbosity
+### Increasing verbosity
 
 Textual writes log messages to inform you about certain events, such as when the user presses a key or clicks on the terminal. To avoid swamping you with too much information, some events are marked as "verbose" and will be excluded from the logs. If you want to see these log messages, you can add the `-v` switch.
 
@@ -80,32 +103,56 @@ Textual writes log messages to inform you about certain events, such as when the
 textual console -v
 ```
 
+### Decreasing verbosity
+
+Log messages are classififed in to groups, and the `-x` flag can be used to **exclude** all message from a group. The groups are: `EVENT`, `DEBUG`, `INFO`, `WARNING`, `ERROR`, `PRINT`, `SYSTEM`, and `LOGGING`. The group a message belongs to is printed after its timestamp.
+
+Multiple groups may be excluded, for example to exclude everything except warning, errors, and `print` statements:
+
+```bash
+textual console -x SYSTEM -x EVENT -x DEBUG -x INFO
+```
+
+### Custom port
+
+You can use the option `--port` to specify a custom port to run the console on, which comes in handy if you have other software running on the port that Textual uses by default:
+
+```bash
+textual console --port 7342
+```
+
+Then, use the command `run` with the same `--port` option:
+
+```bash
+textual run --dev --port 7342 my_app.py
+```
+
+
 ## Textual log
 
-In addition to simple strings, Textual console supports [Rich](https://rich.readthedocs.io/en/latest/) formatting. To write rich logs, import `log` as follows:
+Use the `log` function to pretty-print data structures and anything that [Rich](https://rich.readthedocs.io/en/latest/) can display.
+
+You can import the log function as follows:
 
 ```python
 from textual import log
 ```
 
-This method will pretty print data structures (like lists and dicts) as well as [Rich renderables](https://rich.readthedocs.io/en/stable/protocol.html). Here are some examples:
+Here's a few examples of writing to the console, with `log`:
+
+
 
 ```python
-log("Hello, World")  # simple string
-log(locals())  # Log local variables
-log(children=self.children, pi=3.141592)  # key/values
-log(self.tree)  # Rich renderables
-```
-
-Textual log messages may contain [console Markup](https://rich.readthedocs.io/en/stable/markup.html):
-
-```python
-log("[bold red]DANGER![/] We're having too much fun")
+def on_mount(self) -> None:
+    log("Hello, World")  # simple string
+    log(locals())  # Log local variables
+    log(children=self.children, pi=3.141592)  # key/values
+    log(self.tree)  # Rich renderables
 ```
 
 ### Log method
 
-There's a convenient shortcut to `log` available on the `App` and `Widget` objects. This is useful in event handlers. Here's an example:
+There's a convenient shortcut to `log` on the `App` and `Widget` objects. This is useful in event handlers. Here's an example:
 
 ```python
 from textual.app import App
@@ -120,5 +167,37 @@ class LogApp(App):
 
 if __name__ == "__main__":
     LogApp().run()
+```
 
+## Logging handler
+
+Textual has a [logging handler][textual.logging.TextualHandler] which will write anything logged via the builtin logging library to the devtools.
+This may be useful if you have a third-party library that uses the logging module, and you want to see those logs with Textual logs.
+
+!!! note
+
+    The logging library works with strings only, so you won't be able to log Rich renderables such as `self.tree` with the logging handler.
+
+Here's an example of configuring logging to use the `TextualHandler`.
+
+```python
+import logging
+from textual.app import App
+from textual.logging import TextualHandler
+
+logging.basicConfig(
+    level="NOTSET",
+    handlers=[TextualHandler()],
+)
+
+
+class LogApp(App):
+    """Using logging with Textual."""
+
+    def on_mount(self) -> None:
+        logging.debug("Logged via TextualHandler")
+
+
+if __name__ == "__main__":
+    LogApp().run()
 ```

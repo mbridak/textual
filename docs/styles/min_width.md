@@ -1,6 +1,6 @@
 # Min-width
 
-The `min-width` rule sets a minimum width for a widget.
+The `min-width` style sets a minimum width for a widget.
 
 ## Syntax
 
@@ -8,7 +8,7 @@ The `min-width` rule sets a minimum width for a widget.
 min-width: <a href="../../css_types/scalar">&lt;scalar&gt;</a>;
 --8<-- "docs/snippets/syntax_block_end.md"
 
-The `min-width` rule accepts a [`<scalar>`](../../css_types/scalar) that defines a lower bound for the [`width`](./width) of a widget.
+The `min-width` style accepts a [`<scalar>`](../../css_types/scalar) that defines a lower bound for the [`width`](./width) of a widget.
 That is, the width of a widget is never allowed to be under `min-width`.
 
 ## Example
@@ -42,7 +42,7 @@ Then, we set `min-width` individually on each placeholder.
 min-width: 10;
 
 /* Set the minimum width to 25% of the viewport width */
-min-width: 25vh;
+min-width: 25vw;
 ```
 
 ## Python
@@ -52,7 +52,7 @@ min-width: 25vh;
 widget.styles.min_width = 10
 
 # Set the minimum width to 25% of the viewport width
-widget.styles.min_width = "25vh"
+widget.styles.min_width = "25vw"
 ```
 
 ## See also

@@ -2,51 +2,62 @@ from __future__ import annotations
 
 import asyncio
 import os
-from codecs import getincrementaldecoder
 import selectors
 import signal
 import sys
 import termios
 import tty
-from typing import Any, TYPE_CHECKING
+from codecs import getincrementaldecoder
 from threading import Event, Thread
-
-if TYPE_CHECKING:
-    from rich.console import Console
+from typing import TYPE_CHECKING, Any
 
 import rich.repr
 
-from .. import log
+from .. import events, log
+from .._xterm_parser import XTermParser
 from ..driver import Driver
 from ..geometry import Size
-from .._types import MessageTarget
-from .._xterm_parser import XTermParser
-from .._profile import timer
-from .. import events
+from ._writer_thread import WriterThread
+
+if TYPE_CHECKING:
+    from ..app import App
 
 
-@rich.repr.auto
+@rich.repr.auto(angular=True)
 class LinuxDriver(Driver):
     """Powers display and input for Linux / MacOS"""
 
     def __init__(
         self,
-        console: "Console",
-        target: "MessageTarget",
+        app: App,
         *,
         debug: bool = False,
         size: tuple[int, int] | None = None,
     ) -> None:
-        super().__init__(console, target, debug=debug, size=size)
+        """Initialize Linux driver.
+
+        Args:
+            app: The App instance.
+            debug: Enable debug mode.
+            size: Initial size of the terminal or `None` to detect.
+        """
+        super().__init__(app, debug=debug, size=size)
+        self._file = sys.__stdout__
         self.fileno = sys.stdin.fileno()
         self.attrs_before: list[Any] | None = None
         self.exit_event = Event()
         self._key_thread: Thread | None = None
+        self._writer_thread: WriterThread | None = None
 
     def __rich_repr__(self) -> rich.repr.Result:
-        yield "debug", self._debug
+        yield self._app
 
     def _get_terminal_size(self) -> tuple[int, int]:
+        """Detect the terminal size.
+
+        Returns:
+            The size of the terminal as a tuple of (WIDTH, HEIGHT).
+        """
         width: int | None = 80
         height: int | None = 25
         import shutil
@@ -63,54 +74,69 @@ class LinuxDriver(Driver):
         return width, height
 
     def _enable_mouse_support(self) -> None:
-        write = self.console.file.write
+        """Enable reporting of mouse events."""
+        write = self.write
         write("\x1b[?1000h")  # SET_VT200_MOUSE
         write("\x1b[?1003h")  # SET_ANY_EVENT_MOUSE
         write("\x1b[?1015h")  # SET_VT200_HIGHLIGHT_MOUSE
         write("\x1b[?1006h")  # SET_SGR_EXT_MODE_MOUSE
 
         # write("\x1b[?1007h")
-        self.console.file.flush()
+        self.flush()
 
         # Note: E.g. lxterminal understands 1000h, but not the urxvt or sgr
         #       extensions.
 
     def _enable_bracketed_paste(self) -> None:
         """Enable bracketed paste mode."""
-        self.console.file.write("\x1b[?2004h")
+        self.write("\x1b[?2004h")
 
     def _disable_bracketed_paste(self) -> None:
         """Disable bracketed paste mode."""
-        self.console.file.write("\x1b[?2004l")
+        self.write("\x1b[?2004l")
 
     def _disable_mouse_support(self) -> None:
-        write = self.console.file.write
+        """Disable reporting of mouse events."""
+        write = self.write
         write("\x1b[?1000l")  #
         write("\x1b[?1003l")  #
         write("\x1b[?1015l")
         write("\x1b[?1006l")
-        self.console.file.flush()
+        self.flush()
+
+    def write(self, data: str) -> None:
+        """Write data to the output device.
+
+        Args:
+            data: Raw data.
+        """
+        assert self._writer_thread is not None, "Driver must be in application mode"
+        self._writer_thread.write(data)
 
     def start_application_mode(self):
-
+        """Start application mode."""
         loop = asyncio.get_running_loop()
 
         def send_size_event():
             terminal_size = self._get_terminal_size()
             width, height = terminal_size
             textual_size = Size(width, height)
-            event = events.Resize(self._target, textual_size, textual_size)
+            event = events.Resize(textual_size, textual_size)
             asyncio.run_coroutine_threadsafe(
-                self._target.post_message(event),
+                self._app._post_message(event),
                 loop=loop,
             )
+
+        self._writer_thread = WriterThread(self._file)
+        self._writer_thread.start()
 
         def on_terminal_resize(signum, stack) -> None:
             send_size_event()
 
         signal.signal(signal.SIGWINCH, on_terminal_resize)
 
-        self.console.set_alt_screen(True)
+        self.write("\x1b[?1049h")  # Alt screen
+
         self._enable_mouse_support()
         try:
             self.attrs_before = termios.tcgetattr(self.fileno)
@@ -123,7 +149,6 @@ class LinuxDriver(Driver):
         except termios.error:
             pass
         else:
-
             newattr[tty.LFLAG] = self._patch_lflag(newattr[tty.LFLAG])
             newattr[tty.IFLAG] = self._patch_iflag(newattr[tty.IFLAG])
 
@@ -136,18 +161,23 @@ class LinuxDriver(Driver):
 
             termios.tcsetattr(self.fileno, termios.TCSANOW, newattr)
 
-        self.console.show_cursor(False)
-        self.console.file.write("\033[?1003h\n")
-        self.console.file.flush()
-        self._key_thread = Thread(target=self.run_input_thread, args=(loop,))
+        self.write("\x1b[?25l")  # Hide cursor
+        self.write("\033[?1003h\n")
+        self.flush()
+        self._key_thread = Thread(target=self.run_input_thread)
         send_size_event()
         self._key_thread.start()
         self._request_terminal_sync_mode_support()
         self._enable_bracketed_paste()
 
-    def _request_terminal_sync_mode_support(self):
-        self.console.file.write("\033[?2026$p")
-        self.console.file.flush()
+    def _request_terminal_sync_mode_support(self) -> None:
+        """Writes an escape sequence to query the terminal support for the sync protocol."""
+        # Terminals should ignore this sequence if not supported.
+        # Apple terminal doesn't, and writes a single 'p' in to the terminal,
+        # so we will make a special case for Apple terminal (which doesn't support sync anyway).
+        if os.environ.get("TERM_PROGRAM", "") != "Apple_Terminal":
+            self.write("\033[?2026$p")
+            self.flush()
 
     @classmethod
     def _patch_lflag(cls, attrs: int) -> int:
@@ -169,6 +199,7 @@ class LinuxDriver(Driver):
         )
 
     def disable_input(self) -> None:
+        """Disable further input."""
         try:
             if not self.exit_event.is_set():
                 signal.signal(signal.SIGWINCH, signal.SIG_DFL)
@@ -183,6 +214,7 @@ class LinuxDriver(Driver):
             pass
 
     def stop_application_mode(self) -> None:
+        """Stop application mode, restore state."""
         self._disable_bracketed_paste()
         self.disable_input()
 
@@ -192,18 +224,17 @@ class LinuxDriver(Driver):
             except termios.error:
                 pass
 
-        with self.console:
-            self.console.set_alt_screen(False)
-            self.console.show_cursor(True)
+            # Alt screen false, show cursor
+            self.write("\x1b[?1049l" + "\x1b[?25h")
+            self.flush()
 
-    def run_input_thread(self, loop) -> None:
-        try:
-            self._run_input_thread(loop)
-        except Exception:
-            pass  # TODO: log
+    def close(self) -> None:
+        """Perform cleanup."""
+        if self._writer_thread is not None:
+            self._writer_thread.stop()
 
-    def _run_input_thread(self, loop) -> None:
-
+    def run_input_thread(self) -> None:
+        """Wait for input and dispatch events."""
         selector = selectors.DefaultSelector()
         selector.register(self.fileno, selectors.EVENT_READ)
 
@@ -216,7 +247,7 @@ class LinuxDriver(Driver):
                     return True
             return False
 
-        parser = XTermParser(self._target, more_data, self._debug)
+        parser = XTermParser(more_data, self._debug)
         feed = parser.feed
 
         utf8_decoder = getincrementaldecoder("utf-8")().decode
@@ -235,5 +266,4 @@ class LinuxDriver(Driver):
         except Exception as error:
             log(error)
         finally:
-            with timer("selector.close"):
-                selector.close()
+            selector.close()

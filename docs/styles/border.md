@@ -1,46 +1,28 @@
 # Border
 
-The `border` rule enables the drawing of a box around a widget.
+The `border` style enables the drawing of a box around a widget.
+
+A border style may also be applied to individual edges with `border-top`, `border-right`, `border-bottom`, and `border-left`.
 
 !!! note
 
-    Due to a Textual limitation, [`border`](./border.md) and [`outline`](./outline.md) cannot coexist in the same edge of a widget.
+    [`border`](./border.md) and [`outline`](./outline.md) cannot coexist in the same edge of a widget.
 
 ## Syntax
 
 --8<-- "docs/snippets/syntax_block_start.md"
-border: [<a href="../../css_types/border">&lt;border&gt;</a>] [<a href="../../css_types/color">&lt;color&gt;</a>];
+border: [<a href="../../css_types/border">&lt;border&gt;</a>] [<a href="../../css_types/color">&lt;color&gt;</a>] [<a href="../../css_types/percentage">&lt;percentage&gt;</a>];
 
-border-top: [<a href="../../css_types/border">&lt;border&gt;</a>] [<a href="../../css_types/color">&lt;color&gt;</a>];
-border-right: [<a href="../../css_types/border">&lt;border&gt;</a>] [<a href="../../css_types/color">&lt;color&gt;</a>];
-border-bottom: [<a href="../../css_types/border">&lt;border&gt;</a>] [<a href="../../css_types/color">&lt;color&gt;</a>];
-border-left: [<a href="../../css_types/border">&lt;border&gt;</a>] [<a href="../../css_types/color">&lt;color&gt;</a>];
+border-top: [<a href="../../css_types/border">&lt;border&gt;</a>] [<a href="../../css_types/color">&lt;color&gt;</a>] [<a href="../../css_types/percentage">&lt;percentage&gt;</a>];
+border-right: [<a href="../../css_types/border">&lt;border&gt;</a>] [<a href="../../css_types/color">&lt;color&gt;</a> [<a href="../../css_types/percentage">&lt;percentage&gt;</a>]];
+border-bottom: [<a href="../../css_types/border">&lt;border&gt;</a>] [<a href="../../css_types/color">&lt;color&gt;</a> [<a href="../../css_types/percentage">&lt;percentage&gt;</a>]];
+border-left: [<a href="../../css_types/border">&lt;border&gt;</a>] [<a href="../../css_types/color">&lt;color&gt;</a> [<a href="../../css_types/percentage">&lt;percentage&gt;</a>]];
 --8<-- "docs/snippets/syntax_block_end.md"
 
-The style `border` accepts an optional [`<border>`](../../css_types/border) that sets the visual style of the widget border and an optional [`<color>`](../../css_types/color) to set the color of the border.
+In CSS, the border is set with a [border style](./border.md) and a color. Both are optional. An optional percentage may be added to blend the border with the background color.
 
-Borders may also be set individually for the four edges of a widget with the `border-top`, `border-right`, `border-bottom` and `border-left` rules.
+In Python, the border is set with a tuple of [border style](./border.md) and a color.
 
-### Multiple edge rules
-
-If multiple border rules target the same edge, the last rule that targets a specific edge is the one that is applied to that edge.
-For example, consider the CSS below:
-
-```sass
-Static {
-    border-top: dashed red;
-    border: solid green;  /* overrides the border-top rule above */
-    /* Change the border but just for the bottom edge: */
-    border-bottom: double blue;
-}
-```
-
-The CSS snippet above will add a solid green border around `Static` widgets, except for the bottom edge, which will be double blue.
-
-### Defaults
-
-If `<color>` is specified but `<border>` is not, it defaults to `"solid"`.
-If `<border>` is specified but `<color>`is not, it defaults to green (RGB color `"#00FF00"`).
 
 ## Border command
 
@@ -98,27 +80,7 @@ The next example shows a grid with all the available border types.
 
 ### Borders and outlines
 
-The next example makes the difference between [`border`](./border.md) and [`outline`](./outline.md) clearer by having three labels side-by-side.
-They contain the same text, have the same width and height, and are styled exactly the same up to their `outline` and [`border`](./border.md) rules.
-
-This example also shows that a widget cannot contain both a `border` and an `outline`:
-
-=== "Output"
-
-    ```{.textual path="docs/examples/styles/outline_vs_border.py"}
-    ```
-
-=== "outline_vs_border.py"
-
-    ```python
-    --8<-- "docs/examples/styles/outline_vs_border.py"
-    ```
-
-=== "outline_vs_border.css"
-
-    ```sass hl_lines="5-7 9-11"
-    --8<-- "docs/examples/styles/outline_vs_border.css"
-    ```
+--8<-- "docs/snippets/border_vs_outline_example.md"
 
 ## CSS
 
@@ -126,21 +88,25 @@ This example also shows that a widget cannot contain both a `border` and an `out
 /* Set a heavy white border */
 border: heavy white;
 
-/* set a red border on the left */
+/* Set a red border on the left */
 border-left: outer red;
+
+/* Set a rounded orange border, 50% opacity. */
+border: round orange 50%;
 ```
 
 ## Python
 
 ```python
 # Set a heavy white border
-widget.border = ("heavy", "white")
+widget.styles.border = ("heavy", "white")
 
 # Set a red border on the left
-widget.border_left = ("outer", "red")
+widget.styles.border_left = ("outer", "red")
 ```
 
 ## See also
 
  - [`box-sizing`](./box_sizing.md) to specify how to account for the border in a widget's dimensions.
  - [`outline`](./outline.md) to add an outline around the content of a widget.
+--8<-- "docs/snippets/see_also_border.md"

@@ -7,8 +7,7 @@ from rich.padding import Padding
 from rich.table import Table
 from rich.text import Text
 
-from .color import Color, WHITE
-
+from .color import WHITE, Color
 
 NUMBER_OF_SHADES = 3
 
@@ -26,8 +25,6 @@ class ColorSystem:
 
     Primary is the main theme color
     Secondary is a second theme color
-
-
     """
 
     COLOR_NAMES = [
@@ -95,15 +92,8 @@ class ColorSystem:
     def generate(self) -> dict[str, str]:
         """Generate a mapping of color name on to a CSS color.
 
-        Args:
-            dark (bool, optional): Enable dark mode. Defaults to False.
-            luminosity_spread (float, optional): Amount of luminosity to subtract and add to generate
-                shades. Defaults to 0.2.
-            text_alpha (float, optional): Alpha value for text. Defaults to 0.9.
-
         Returns:
-            dict[str, str]: A mapping of color name on to a CSS-style encoded color
-
+            A mapping of color name on to a CSS-style encoded color
         """
 
         primary = self.primary
@@ -141,7 +131,6 @@ class ColorSystem:
 
             Returns:
                 Iterable of tuples (<SHADE SUFFIX, LUMINOSITY DELTA>)
-
             """
             luminosity_step = spread / 2
             for n in range(-NUMBER_OF_SHADES, +NUMBER_OF_SHADES + 1):
@@ -198,12 +187,11 @@ def show_design(light: ColorSystem, dark: ColorSystem) -> Table:
     """Generate a renderable to show color systems.
 
     Args:
-        light (ColorSystem): Light ColorSystem.
-        dark (ColorSystem): Dark ColorSystem
+        light: Light ColorSystem.
+        dark: Dark ColorSystem
 
     Returns:
-        Table: Table showing all colors.
-
+        Table showing all colors.
     """
 
     @group()

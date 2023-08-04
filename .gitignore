@@ -110,12 +110,15 @@ venv.bak/
 
 # mkdocs documentation
 /site
+/docs-offline
+/mkdocs-nav-online.yml
+/mkdocs-nav-offline.yml
 
 # mypy
 .mypy_cache/
 
-# Snapshot testing report output directory
-tests/snapshot_tests/output
+# Snapshot testing report output (default location)
+snapshot_report.html
 
 # Sandbox folder - convenient place for us to develop small test apps without leaving the repo
 sandbox/

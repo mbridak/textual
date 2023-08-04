@@ -5,7 +5,7 @@ from enum import Enum
 
 
 # Adapted from prompt toolkit https://github.com/prompt-toolkit/python-prompt-toolkit/blob/master/prompt_toolkit/keys.py
-class Keys(str, Enum):
+class Keys(str, Enum):  # type: ignore[no-redef]
     """
     List of keys for use in key bindings.
 
@@ -13,7 +13,9 @@ class Keys(str, Enum):
     strings.
     """
 
-    value: str
+    @property
+    def value(self) -> str:
+        return super().value
 
     Escape = "escape"  # Also Control-[
     ShiftEscape = "shift+escape"
@@ -209,6 +211,37 @@ KEY_NAME_REPLACEMENTS = {
 }
 REPLACED_KEYS = {value: key for key, value in KEY_NAME_REPLACEMENTS.items()}
 
+# Convert the friendly versions of character key Unicode names
+# back to their original names.
+# This is because we go from Unicode to friendly by replacing spaces and dashes
+# with underscores, which cannot be undone by replacing underscores with spaces/dashes.
+KEY_TO_UNICODE_NAME = {
+    "exclamation_mark": "EXCLAMATION MARK",
+    "quotation_mark": "QUOTATION MARK",
+    "number_sign": "NUMBER SIGN",
+    "dollar_sign": "DOLLAR SIGN",
+    "percent_sign": "PERCENT SIGN",
+    "left_parenthesis": "LEFT PARENTHESIS",
+    "right_parenthesis": "RIGHT PARENTHESIS",
+    "plus_sign": "PLUS SIGN",
+    "hyphen_minus": "HYPHEN-MINUS",
+    "full_stop": "FULL STOP",
+    "less_than_sign": "LESS-THAN SIGN",
+    "equals_sign": "EQUALS SIGN",
+    "greater_than_sign": "GREATER-THAN SIGN",
+    "question_mark": "QUESTION MARK",
+    "commercial_at": "COMMERCIAL AT",
+    "left_square_bracket": "LEFT SQUARE BRACKET",
+    "reverse_solidus": "REVERSE SOLIDUS",
+    "right_square_bracket": "RIGHT SQUARE BRACKET",
+    "circumflex_accent": "CIRCUMFLEX ACCENT",
+    "low_line": "LOW LINE",
+    "grave_accent": "GRAVE ACCENT",
+    "left_curly_bracket": "LEFT CURLY BRACKET",
+    "vertical_line": "VERTICAL LINE",
+    "right_curly_bracket": "RIGHT CURLY BRACKET",
+}
+
 # Some keys have aliases. For example, if you press `ctrl+m` on your keyboard,
 # it's treated the same way as if you press `enter`. Key handlers `key_ctrl_m` and
 # `key_enter` are both valid in this case.
@@ -228,7 +261,17 @@ KEY_DISPLAY_ALIASES = {
     "backspace": "⌫",
     "escape": "ESC",
     "enter": "⏎",
+    "minus": "-",
+    "space": "SPACE",
 }
+
+
+def _get_unicode_name_from_key(key: str) -> str:
+    """Get the best guess for the Unicode name of the char corresponding to the key.
+
+    This function can be seen as a pseudo-inverse of the function `_character_to_key`.
+    """
+    return KEY_TO_UNICODE_NAME.get(key, key.upper())
 
 
 def _get_key_aliases(key: str) -> list[str]:
@@ -245,22 +288,24 @@ def _get_key_display(key: str) -> str:
         return display_alias
 
     original_key = REPLACED_KEYS.get(key, key)
-    upper_original = original_key.upper().replace("_", " ")
+    tentative_unicode_name = _get_unicode_name_from_key(original_key)
     try:
-        unicode_character = unicodedata.lookup(upper_original)
+        unicode_character = unicodedata.lookup(tentative_unicode_name)
     except KeyError:
-        return upper_original
+        return tentative_unicode_name
 
     # Check if printable. `delete` for example maps to a control sequence
     # which we don't want to write to the terminal.
     if unicode_character.isprintable():
         return unicode_character
-    return upper_original
+    return tentative_unicode_name
 
 
 def _character_to_key(character: str) -> str:
-    """Convert a single character to a key value."""
-    assert len(character) == 1
+    """Convert a single character to a key value.
+
+    This transformation can be undone by the function `_get_unicode_name_from_key`.
+    """
     if not character.isalnum():
         key = unicodedata.name(character).lower().replace("-", "_").replace(" ", "_")
     else:

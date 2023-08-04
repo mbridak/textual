@@ -1,4 +1,6 @@
-# List Item
+# ListItem
+
+!!! tip "Added in version 0.6.0"
 
 `ListItem` is the type of the elements in a `ListView`.
 
@@ -24,23 +26,19 @@ of multiple `ListItem`s. The arrow keys can be used to navigate the list.
 ## Reactive Attributes
 
 | Name          | Type   | Default | Description                          |
-|---------------|--------|---------|--------------------------------------|
+| ------------- | ------ | ------- | ------------------------------------ |
 | `highlighted` | `bool` | `False` | True if this ListItem is highlighted |
 
-## Messages
-
-### Selected
-
-The `ListItem.Selected` message is sent when the item is selected.
-
- - [x] Bubbles
 
 #### Attributes
 
 | attribute | type       | purpose                     |
-|-----------|------------|-----------------------------|
+| --------- | ---------- | --------------------------- |
 | `item`    | `ListItem` | The item that was selected. |
 
-## See Also
+---
 
-* [ListItem](../api/list_item.md) code reference
+
+::: textual.widgets.ListItem
+    options:
+      heading_level: 2

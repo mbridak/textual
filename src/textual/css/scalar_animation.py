@@ -2,22 +2,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .scalar import ScalarOffset, Scalar
-from .._animator import Animation
-from .._animator import EasingFunction
+from .._animator import Animation, EasingFunction
 from .._types import CallbackType
-
+from .scalar import Scalar, ScalarOffset
 
 if TYPE_CHECKING:
-    from ..dom import DOMNode
-
+    from ..widget import Widget
     from .styles import StylesBase
 
 
 class ScalarAnimation(Animation):
     def __init__(
         self,
-        widget: DOMNode,
+        widget: Widget,
         styles: StylesBase,
         start_time: float,
         attribute: str,
@@ -65,9 +62,23 @@ class ScalarAnimation(Animation):
             value = self.start + (self.destination - self.start) * eased_factor
         current = self.styles.get_rule(self.attribute)
         if current != value:
-            setattr(self.styles, f"{self.attribute}", value)
+            setattr(self.styles, self.attribute, value)
 
         return False
+
+    async def stop(self, complete: bool = True) -> None:
+        """Stop the animation.
+
+        Args:
+            complete: Flag to say if the animation should be taken to completion.
+
+        Note:
+            [`on_complete`][Animation.on_complete] will be called regardless
+            of the value provided for `complete`.
+        """
+        if complete:
+            setattr(self.styles, self.attribute, self.final_value)
+        await self.invoke_callback()
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, ScalarAnimation):

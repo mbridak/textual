@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from typing import cast
-from textual._typing import Final, Literal
+from typing import TYPE_CHECKING, cast
+
+from typing_extensions import Literal
+
+if TYPE_CHECKING:
+    from typing_extensions import Final
 
 FEATURES: Final = {"devtools", "debug", "headless"}
 
@@ -12,10 +16,10 @@ def parse_features(features: str) -> frozenset[FeatureFlag]:
     """Parse features env var
 
     Args:
-        features (str): Comma separated feature flags
+        features: Comma separated feature flags
 
     Returns:
-        frozenset[FeatureFlag]: A frozen set of known features.
+        A frozen set of known features.
     """
 
     features_set = frozenset(

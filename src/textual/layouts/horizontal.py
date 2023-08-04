@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from fractions import Fraction
+from typing import TYPE_CHECKING
 
-from .._resolve import resolve_box_models
-from ..geometry import Size, Region
 from .._layout import ArrangeResult, Layout, WidgetPlacement
-from ..widget import Widget
+from .._resolve import resolve_box_models
+from ..geometry import Region, Size
+
+if TYPE_CHECKING:
+    from ..geometry import Spacing
+    from ..widget import Widget
 
 
 class HorizontalLayout(Layout):
@@ -18,18 +22,37 @@ class HorizontalLayout(Layout):
     def arrange(
         self, parent: Widget, children: list[Widget], size: Size
     ) -> ArrangeResult:
-
         placements: list[WidgetPlacement] = []
         add_placement = placements.append
-        x = max_height = Fraction(0)
-        parent_size = parent.outer_size
+
+        child_styles = [child.styles for child in children]
+        box_margins: list[Spacing] = [styles.margin for styles in child_styles]
+        if box_margins:
+            resolve_margin = Size(
+                sum(
+                    [
+                        max(margin1[1], margin2[3])
+                        for margin1, margin2 in zip(box_margins, box_margins[1:])
+                    ]
+                )
+                + (box_margins[0].left + box_margins[-1].right),
+                max(
+                    [
+                        margin_top + margin_bottom
+                        for margin_top, _, margin_bottom, _ in box_margins
+                    ]
+                ),
+            )
+        else:
+            resolve_margin = Size(0, 0)
 
         box_models = resolve_box_models(
-            [child.styles.width for child in children],
+            [styles.width for styles in child_styles],
             children,
             size,
-            parent_size,
-            dimension="width",
+            parent.app.size,
+            resolve_margin,
+            resolve_dimension="width",
         )
 
         margins = [
@@ -39,23 +62,29 @@ class HorizontalLayout(Layout):
         if box_models:
             margins.append(box_models[-1].margin.right)
 
-        x = Fraction(box_models[0].margin.left if box_models else 0)
-
-        displayed_children = [child for child in children if child.display]
+        x = next(
+            (
+                Fraction(box_model.margin.left)
+                for box_model, child in zip(box_models, children)
+                if child.styles.overlay != "screen"
+            ),
+            Fraction(0),
+        )
 
         _Region = Region
         _WidgetPlacement = WidgetPlacement
         for widget, box_model, margin in zip(children, box_models, margins):
+            overlay = widget.styles.overlay == "screen"
             content_width, content_height, box_margin = box_model
             offset_y = box_margin.top
             next_x = x + content_width
             region = _Region(
                 int(x), offset_y, int(next_x - int(x)), int(content_height)
             )
-            max_height = max(
-                max_height, content_height + offset_y + box_model.margin.bottom
+            add_placement(
+                _WidgetPlacement(region, box_model.margin, widget, 0, False, overlay)
             )
-            add_placement(_WidgetPlacement(region, box_model.margin, widget, 0))
-            x = next_x + margin
+            if not overlay:
+                x = next_x + margin
 
-        return placements, set(displayed_children)
+        return placements

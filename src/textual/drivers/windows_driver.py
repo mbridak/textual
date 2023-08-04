@@ -5,13 +5,12 @@ import sys
 from threading import Event, Thread
 from typing import TYPE_CHECKING, Callable
 
-from .._context import active_app
-from .._types import MessageTarget
 from ..driver import Driver
 from . import win32
+from ._writer_thread import WriterThread
 
 if TYPE_CHECKING:
-    from rich.console import Console
+    from ..app import App
 
 
 class WindowsDriver(Driver):
@@ -19,64 +18,82 @@ class WindowsDriver(Driver):
 
     def __init__(
         self,
-        console: "Console",
-        target: "MessageTarget",
+        app: App,
         *,
         debug: bool = False,
         size: tuple[int, int] | None = None,
     ) -> None:
-        super().__init__(console, target, debug=debug, size=size)
-        self.in_fileno = sys.stdin.fileno()
-        self.out_fileno = sys.stdout.fileno()
+        """Initialize Windows driver.
 
+        Args:
+            app: The App instance.
+            debug: Enable debug mode.
+            size: Initial size of the terminal or `None` to detect.
+        """
+        super().__init__(app, debug=debug, size=size)
+        self._file = sys.__stdout__
         self.exit_event = Event()
         self._event_thread: Thread | None = None
         self._restore_console: Callable[[], None] | None = None
+        self._writer_thread: WriterThread | None = None
+
+    def write(self, data: str) -> None:
+        """Write data to the output device.
+
+        Args:
+            data: Raw data.
+        """
+        assert self._writer_thread is not None, "Driver must be in application mode"
+        self._writer_thread.write(data)
 
     def _enable_mouse_support(self) -> None:
-        write = self.console.file.write
+        """Enable reporting of mouse events."""
+        write = self.write
         write("\x1b[?1000h")  # SET_VT200_MOUSE
         write("\x1b[?1003h")  # SET_ANY_EVENT_MOUSE
         write("\x1b[?1015h")  # SET_VT200_HIGHLIGHT_MOUSE
         write("\x1b[?1006h")  # SET_SGR_EXT_MODE_MOUSE
-        self.console.file.flush()
+        self.flush()
 
     def _disable_mouse_support(self) -> None:
-        write = self.console.file.write
+        """Disable reporting of mouse events."""
+        write = self.write
         write("\x1b[?1000l")
         write("\x1b[?1003l")
         write("\x1b[?1015l")
         write("\x1b[?1006l")
-        self.console.file.flush()
+        self.flush()
 
     def _enable_bracketed_paste(self) -> None:
         """Enable bracketed paste mode."""
-        self.console.file.write("\x1b[?2004h")
+        self.write("\x1b[?2004h")
 
     def _disable_bracketed_paste(self) -> None:
         """Disable bracketed paste mode."""
-        self.console.file.write("\x1b[?2004l")
+        self.write("\x1b[?2004l")
 
     def start_application_mode(self) -> None:
-
+        """Start application mode."""
         loop = asyncio.get_running_loop()
 
         self._restore_console = win32.enable_application_mode()
 
-        self.console.set_alt_screen(True)
+        self._writer_thread = WriterThread(self._file)
+        self._writer_thread.start()
+
+        self.write("\x1b[?1049h")  # Enable alt screen
         self._enable_mouse_support()
-        self.console.show_cursor(False)
-        self.console.file.write("\033[?1003h\n")
+        self.write("\x1b[?25l")  # Hide cursor
+        self.write("\033[?1003h\n")
         self._enable_bracketed_paste()
 
-        app = active_app.get()
-
         self._event_thread = win32.EventMonitor(
-            loop, app, self._target, self.exit_event, self.process_event
+            loop, self._app, self.exit_event, self.process_event
         )
         self._event_thread.start()
 
     def disable_input(self) -> None:
+        """Disable further input."""
         try:
             if not self.exit_event.is_set():
                 self._disable_mouse_support()
@@ -90,10 +107,17 @@ class WindowsDriver(Driver):
             pass
 
     def stop_application_mode(self) -> None:
+        """Stop application mode, restore state."""
         self._disable_bracketed_paste()
         self.disable_input()
+
+        # Disable alt screen, show cursor
+        self.write("\x1b[?1049l" + "\x1b[?25h")
+        self.flush()
+
+    def close(self) -> None:
+        """Perform cleanup."""
+        if self._writer_thread is not None:
+            self._writer_thread.stop()
         if self._restore_console:
             self._restore_console()
-        with self.console:
-            self.console.set_alt_screen(False)
-            self.console.show_cursor(True)

@@ -1,4 +1,4 @@
- *  {
+* {
     transition: background 500ms in_out_cubic, color 500ms in_out_cubic;
 }
 
@@ -102,6 +102,7 @@ Column {
     height: auto;
     min-height: 100vh;
     align: center top;
+    overflow: hidden;
 }
 
 
@@ -119,18 +120,18 @@ DarkSwitch .label {
     color: $text-muted;
 }
 
-DarkSwitch Checkbox {
+DarkSwitch Switch {
     background: $boost;
     dock: left;
 }
 
 
-Screen > Container {
+Screen>Container {
     height: 100%;
     overflow: hidden;
 }
 
-TextLog {
+RichLog {
     background: $surface;
     color: $text;
     height: 50vh;
@@ -143,11 +144,11 @@ TextLog {
 }
 
 
-TextLog:focus {
+RichLog:focus {
     offset: 0 0 !important;
 }
 
-TextLog.-hidden {
+RichLog.-hidden {
     offset-y: 100%;
 }
 
@@ -207,6 +208,7 @@ LocationLink:hover {
 
 DataTable {
     height: 16;
+    max-height: 16;
 }
 
 
@@ -222,7 +224,7 @@ LoginForm {
     border: wide $background;
 }
 
-LoginForm Button{
+LoginForm Button {
     margin: 0 1;
     width: 100%;
 }
@@ -250,7 +252,7 @@ Window {
     max-height: 16;
 }
 
-Window > Static {
+Window>Static {
     width: auto;
 }
 

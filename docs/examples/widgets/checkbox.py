@@ -1,35 +1,25 @@
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal
-from textual.widgets import Checkbox, Static
+from textual.containers import VerticalScroll
+from textual.widgets import Checkbox
 
 
-class CheckboxApp(App):
+class CheckboxApp(App[None]):
+    CSS_PATH = "checkbox.css"
+
     def compose(self) -> ComposeResult:
-        yield Static("[b]Example checkboxes\n", classes="label")
-        yield Horizontal(
-            Static("off:     ", classes="label"),
-            Checkbox(animate=False),
-            classes="container",
-        )
-        yield Horizontal(
-            Static("on:      ", classes="label"),
-            Checkbox(value=True),
-            classes="container",
-        )
+        with VerticalScroll():
+            yield Checkbox("Arrakis :sweat:")
+            yield Checkbox("Caladan")
+            yield Checkbox("Chusuk")
+            yield Checkbox("[b]Giedi Prime[/b]")
+            yield Checkbox("[magenta]Ginaz[/]")
+            yield Checkbox("Grumman", True)
+            yield Checkbox("Kaitain", id="initial_focus")
+            yield Checkbox("Novebruns", True)
 
-        focused_checkbox = Checkbox()
-        focused_checkbox.focus()
-        yield Horizontal(
-            Static("focused: ", classes="label"), focused_checkbox, classes="container"
-        )
-
-        yield Horizontal(
-            Static("custom:  ", classes="label"),
-            Checkbox(id="custom-design"),
-            classes="container",
-        )
+    def on_mount(self):
+        self.query_one("#initial_focus", Checkbox).focus()
 
 
-app = CheckboxApp(css_path="checkbox.css")
 if __name__ == "__main__":
-    app.run()
+    CheckboxApp().run()

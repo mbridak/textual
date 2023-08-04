@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import ast
 import re
+from typing import Any
+
+from typing_extensions import TypeAlias
+
+ActionParseResult: TypeAlias = "tuple[str, tuple[Any, ...]]"
+"""An action is its name and the arbitrary tuple of its arguments."""
 
 
 class SkipAction(Exception):
@@ -12,35 +18,38 @@ class ActionError(Exception):
     pass
 
 
-re_action_params = re.compile(r"([\w\.]+)(\(.*?\))")
+re_action_args = re.compile(r"([\w\.]+)\((.*)\)")
 
 
-def parse(action: str) -> tuple[str, tuple[object, ...]]:
+def parse(action: str) -> ActionParseResult:
     """Parses an action string.
 
     Args:
-        action (str): String containing action.
+        action: String containing action.
 
     Raises:
         ActionError: If the action has invalid syntax.
 
     Returns:
-        tuple[str, tuple[object, ...]]: Action name and parameters
+        Action name and arguments.
     """
-    params_match = re_action_params.match(action)
-    if params_match is not None:
-        action_name, action_params_str = params_match.groups()
-        try:
-            action_params = ast.literal_eval(action_params_str)
-        except Exception:
-            raise ActionError(
-                f"unable to parse {action_params_str!r} in action {action!r}"
-            )
+    args_match = re_action_args.match(action)
+    if args_match is not None:
+        action_name, action_args_str = args_match.groups()
+        if action_args_str:
+            try:
+                # We wrap `action_args_str` to be able to disambiguate the cases where
+                # the list of arguments is a comma-separated list of values from the
+                # case where the argument is a single tuple.
+                action_args: tuple[Any, ...] = ast.literal_eval(f"({action_args_str},)")
+            except Exception:
+                raise ActionError(
+                    f"unable to parse {action_args_str!r} in action {action!r}"
+                )
+        else:
+            action_args = ()
     else:
         action_name = action
-        action_params = ()
+        action_args = ()
 
-    return (
-        action_name,
-        action_params if isinstance(action_params, tuple) else (action_params,),
-    )
+    return action_name, action_args

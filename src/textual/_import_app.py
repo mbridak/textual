@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import os
-import sys
 import runpy
 import shlex
+import sys
 from pathlib import Path
-from typing import cast, TYPE_CHECKING
-
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from textual.app import App
@@ -20,10 +19,10 @@ def shebang_python(candidate: Path) -> bool:
     """Does the given file look like it's run with Python?
 
     Args:
-        candidate (Path): The candidate file to check.
+        candidate: The candidate file to check.
 
     Returns:
-        bool: ``True`` if it looks to #! python, ``False`` if not.
+        ``True`` if it looks to #! python, ``False`` if not.
     """
     try:
         with candidate.open("rb") as source:
@@ -37,19 +36,19 @@ def import_app(import_name: str) -> App:
     """Import an app from a path or import name.
 
     Args:
-        import_name (str): A name to import, such as `foo.bar`, or a path ending with .py.
+        import_name: A name to import, such as `foo.bar`, or a path ending with .py.
 
     Raises:
         AppFail: If the app could not be found for any reason.
 
     Returns:
-        App: A Textual application
+        A Textual application
     """
 
-    import inspect
     import importlib
+    import inspect
 
-    from textual.app import App, WINDOWS
+    from textual.app import WINDOWS, App
 
     import_name, *argv = shlex.split(import_name, posix=not WINDOWS)
     drive, import_name = os.path.splitdrive(import_name)
@@ -113,10 +112,11 @@ def import_app(import_name: str) -> App:
         except ImportError as error:
             raise AppFail(str(error))
 
+        find_app = name or "app"
         try:
-            app = getattr(module, name or "app")
+            app = getattr(module, find_app or "app")
         except AttributeError:
-            raise AppFail(f"Unable to find {name!r} in {module!r}")
+            raise AppFail(f"Unable to find {find_app!r} in {module!r}")
 
         sys.argv[:] = [import_name, *argv]
 

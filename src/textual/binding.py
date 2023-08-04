@@ -1,14 +1,24 @@
+"""
+
+A binding maps a key press on to an action.
+
+See [bindings](/guide/input#bindings) in the guide for details.
+"""
+
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, MutableMapping
+from typing import TYPE_CHECKING, Iterable
 
 import rich.repr
 
-from textual.keys import _character_to_key
-from textual._typing import TypeAlias
+from .keys import _character_to_key
 
-BindingType: TypeAlias = "Binding | tuple[str, str, str]"
+if TYPE_CHECKING:
+    from typing_extensions import TypeAlias
+
+BindingType: TypeAlias = "Binding | tuple[str, str] | tuple[str, str, str]"
 
 
 class BindingError(Exception):
@@ -28,21 +38,21 @@ class Binding:
     """The configuration of a key binding."""
 
     key: str
-    """str: Key to bind. This can also be a comma-separated list of keys to map multiple keys to a single action."""
+    """Key to bind. This can also be a comma-separated list of keys to map multiple keys to a single action."""
     action: str
-    """str: Action to bind to."""
-    description: str
-    """str: Description of action."""
+    """Action to bind to."""
+    description: str = ""
+    """Description of action."""
     show: bool = True
-    """bool: Show the action in Footer, or False to hide."""
+    """Show the action in Footer, or False to hide."""
     key_display: str | None = None
-    """str | None: How the key should be shown in footer."""
+    """How the key should be shown in footer."""
     priority: bool = False
-    """bool: Enable priority binding for this key."""
+    """Enable priority binding for this key."""
 
 
 @rich.repr.auto
-class Bindings:
+class _Bindings:
     """Manage a set of bindings."""
 
     def __init__(
@@ -52,7 +62,7 @@ class Bindings:
         """Initialise a collection of bindings.
 
         Args:
-            bindings (Iterable[BindingType] | None, optional): An optional set of initial bindings.
+            bindings: An optional set of initial bindings.
 
         Note:
             The iterable of bindings can contain either a `Binding`
@@ -64,9 +74,9 @@ class Bindings:
             for binding in bindings:
                 # If it's a tuple of length 3, convert into a Binding first
                 if isinstance(binding, tuple):
-                    if len(binding) != 3:
+                    if len(binding) not in (2, 3):
                         raise BindingError(
-                            f"BINDINGS must contain a tuple of three strings, not {binding!r}"
+                            f"BINDINGS must contain a tuple of two or three strings, not {binding!r}"
                         )
                     binding = Binding(*binding)
 
@@ -85,42 +95,48 @@ class Bindings:
                         key=key,
                         action=binding.action,
                         description=binding.description,
-                        show=binding.show,
+                        show=bool(binding.description and binding.show),
                         key_display=binding.key_display,
                         priority=binding.priority,
                     )
 
-        self.keys: MutableMapping[str, Binding] = (
+        self.keys: dict[str, Binding] = (
             {binding.key: binding for binding in make_bindings(bindings)}
             if bindings
             else {}
         )
 
+    def copy(self) -> _Bindings:
+        """Return a copy of this instance.
+
+        Return:
+            New bindings object.
+        """
+        copy = _Bindings()
+        copy.keys = self.keys.copy()
+        return copy
+
     def __rich_repr__(self) -> rich.repr.Result:
         yield self.keys
 
     @classmethod
-    def merge(cls, bindings: Iterable[Bindings]) -> Bindings:
+    def merge(cls, bindings: Iterable[_Bindings]) -> _Bindings:
         """Merge a bindings. Subsequent bound keys override initial keys.
 
         Args:
-            bindings (Iterable[Bindings]): A number of bindings.
+            bindings: A number of bindings.
 
         Returns:
-            Bindings: New bindings.
+            New bindings.
         """
         keys: dict[str, Binding] = {}
         for _bindings in bindings:
             keys.update(_bindings.keys)
-        return Bindings(keys.values())
+        return _Bindings(keys.values())
 
     @property
     def shown_keys(self) -> list[Binding]:
-        """A list of bindings for shown keys.
-
-        Returns:
-            list[Binding]: Shown bindings.
-        """
+        """A list of bindings for shown keys."""
         keys = [binding for binding in self.keys.values() if binding.show]
         return keys
 
@@ -136,12 +152,12 @@ class Bindings:
         """Bind keys to an action.
 
         Args:
-            keys (str): The keys to bind. Can be a comma-separated list of keys.
-            action (str): The action to bind the keys to.
-            description (str, optional): An optional description for the binding.
-            show (bool, optional): A flag to say if the binding should appear in the footer.
-            key_display (str | None, optional): Optional string to display in the footer for the key.
-            priority (bool, optional): Is this a priority binding, checked form app down to focused widget?
+            keys: The keys to bind. Can be a comma-separated list of keys.
+            action: The action to bind the keys to.
+            description: An optional description for the binding.
+            show: A flag to say if the binding should appear in the footer.
+            key_display: Optional string to display in the footer for the key.
+            priority: Is this a priority binding, checked form app down to focused widget?
         """
         all_keys = [key.strip() for key in keys.split(",")]
         for key in all_keys:
@@ -149,7 +165,7 @@ class Bindings:
                 key,
                 action,
                 description,
-                show=show,
+                show=bool(description and show),
                 key_display=key_display,
                 priority=priority,
             )
@@ -158,13 +174,13 @@ class Bindings:
         """Get a binding if it exists.
 
         Args:
-            key (str): Key to look up.
+            key: Key to look up.
 
         Raises:
             NoBinding: If the binding does not exist.
 
         Returns:
-            Binding: A binding object for the key,
+            A binding object for the key,
         """
         try:
             return self.keys[key]

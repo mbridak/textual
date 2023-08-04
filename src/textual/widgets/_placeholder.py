@@ -1,14 +1,24 @@
+"""Provides a Textual placeholder widget; useful when designing an app's layout."""
+
 from __future__ import annotations
 
 from itertools import cycle
+from typing import Iterator
+from weakref import WeakKeyDictionary
+
+from rich.console import RenderableType
+from typing_extensions import Literal, Self
+
+from textual.app import App
 
 from .. import events
 from ..css._error_tools import friendly_list
 from ..reactive import Reactive, reactive
-from ..widget import Widget, RenderResult
-from .._typing import Literal
+from ..widget import Widget
 
 PlaceholderVariant = Literal["default", "size", "text"]
+"""The different variants of placeholder."""
+
 _VALID_PLACEHOLDER_VARIANTS_ORDERED: list[PlaceholderVariant] = [
     "default",
     "size",
@@ -46,9 +56,12 @@ class Placeholder(Widget):
     can also be initialised in a specific variant.
 
     The variants available are:
-        default: shows an identifier label or the ID of the placeholder.
-        size: shows the size of the placeholder.
-        text: shows some Lorem Ipsum text on the placeholder.
+
+    | Variant | Placeholder shows                              |
+    |---------|------------------------------------------------|
+    | default | Identifier label or the ID of the placeholder. |
+    | size    | Size of the placeholder.                       |
+    | text    | Lorem Ipsum text.                              |
     """
 
     DEFAULT_CSS = """
@@ -57,24 +70,18 @@ class Placeholder(Widget):
         overflow: hidden;
         color: $text;
     }
-
     Placeholder.-text {
         padding: 1;
     }
     """
 
     # Consecutive placeholders get assigned consecutive colors.
-    _COLORS = cycle(_PLACEHOLDER_BACKGROUND_COLORS)
+    _COLORS: WeakKeyDictionary[App, Iterator[str]] = WeakKeyDictionary()
     _SIZE_RENDER_TEMPLATE = "[b]{} x {}[/b]"
 
-    variant: Reactive[PlaceholderVariant] = reactive("default")
+    variant: Reactive[PlaceholderVariant] = reactive[PlaceholderVariant]("default")
 
-    _renderables: dict[PlaceholderVariant, RenderResult]
-
-    @classmethod
-    def reset_color_cycle(cls) -> None:
-        """Reset the placeholder background color cycle."""
-        cls._COLORS = cycle(_PLACEHOLDER_BACKGROUND_COLORS)
+    _renderables: dict[PlaceholderVariant, str]
 
     def __init__(
         self,
@@ -88,15 +95,13 @@ class Placeholder(Widget):
         """Create a Placeholder widget.
 
         Args:
-            label (str | None, optional): The label to identify the placeholder.
-                If no label is present, uses the placeholder ID instead. Defaults to None.
-            variant (PlaceholderVariant, optional): The variant of the placeholder.
-                Defaults to "default".
-            name (str | None, optional): The name of the placeholder. Defaults to None.
-            id (str | None, optional): The ID of the placeholder in the DOM.
-                Defaults to None.
-            classes (str | None, optional): A space separated string with the CSS classes
-                of the placeholder, if any. Defaults to None.
+            label: The label to identify the placeholder.
+                If no label is present, uses the placeholder ID instead.
+            variant: The variant of the placeholder.
+            name: The name of the placeholder.
+            id: The ID of the placeholder in the DOM.
+            classes: A space separated string with the CSS classes
+                of the placeholder, if any.
         """
         # Create and cache renderables for all the variants.
         self._renderables = {
@@ -107,20 +112,37 @@ class Placeholder(Widget):
 
         super().__init__(name=name, id=id, classes=classes)
 
-        self.styles.background = f"{next(Placeholder._COLORS)} 50%"
-
         self.variant = self.validate_variant(variant)
+        """The current variant of the placeholder."""
+
         # Set a cycle through the variants with the correct starting point.
         self._variants_cycle = cycle(_VALID_PLACEHOLDER_VARIANTS_ORDERED)
         while next(self._variants_cycle) != self.variant:
             pass
 
-    def render(self) -> RenderResult:
+    def on_mount(self) -> None:
+        """Set the color for this placeholder."""
+        colors = Placeholder._COLORS.setdefault(
+            self.app, cycle(_PLACEHOLDER_BACKGROUND_COLORS)
+        )
+        self.styles.background = f"{next(colors)} 50%"
+
+    def render(self) -> RenderableType:
+        """Render the placeholder.
+
+        Returns:
+            The value to render.
+        """
         return self._renderables[self.variant]
 
-    def cycle_variant(self) -> None:
-        """Get the next variant in the cycle."""
+    def cycle_variant(self) -> Self:
+        """Get the next variant in the cycle.
+
+        Returns:
+            The `Placeholder` instance.
+        """
         self.variant = next(self._variants_cycle)
+        return self
 
     def watch_variant(
         self, old_variant: PlaceholderVariant, variant: PlaceholderVariant
@@ -137,12 +159,12 @@ class Placeholder(Widget):
             )
         return variant
 
-    def on_click(self) -> None:
+    async def _on_click(self, _: events.Click) -> None:
         """Click handler to cycle through the placeholder variants."""
         self.cycle_variant()
 
-    def on_resize(self, event: events.Resize) -> None:
+    def _on_resize(self, event: events.Resize) -> None:
         """Update the placeholder "size" variant with the new placeholder size."""
-        self._renderables["size"] = self._SIZE_RENDER_TEMPLATE.format(*self.size)
+        self._renderables["size"] = self._SIZE_RENDER_TEMPLATE.format(*event.size)
         if self.variant == "size":
-            self.refresh(layout=True)
+            self.refresh()

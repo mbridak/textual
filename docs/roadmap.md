@@ -6,7 +6,7 @@ hide:
 
 # Roadmap
 
-We ([textualize.io](https://www.textualize.io/)) are actively building and maintaining Textual. 
+We ([textualize.io](https://www.textualize.io/)) are actively building and maintaining Textual.
 
 We have many new features in the pipeline. This page will keep track of that work.
 
@@ -18,34 +18,34 @@ High-level features we plan on implementing.
     * [ ] Integration with screen readers
     * [x] Monochrome mode
     * [ ] High contrast theme
-    * [ ] Color blind themes
+    * [ ] Color-blind themes
 - [ ] Command interface
     * [ ] Command menu
     * [ ] Fuzzy search
 - [ ] Configuration (.toml based extensible configuration format)
-- [x] Console 
+- [x] Console
 - [ ] Devtools
-    * [ ] Integrated log 
-    * [ ] DOM tree view 
+    * [ ] Integrated log
+    * [ ] DOM tree view
     * [ ] REPL
 - [ ] Reactive state abstraction
-- [x] Themes 
-    * [ ] Customize via config 
+- [x] Themes
+    * [ ] Customize via config
     * [ ] Builtin theme editor
 
 ## Widgets
 
-Widgets are key to making user friendly interfaces. The builtin widgets should cover many common (and some uncommon) use-cases. The following is a list of the widgets we have built or are planning to build.
+Widgets are key to making user-friendly interfaces. The builtin widgets should cover many common (and some uncommon) use-cases. The following is a list of the widgets we have built or are planning to build.
 
 - [x] Buttons
     * [x] Error / warning variants
 - [ ] Color picker
-- [x] Checkbox
-- [ ] Content switcher
+- [X] Checkbox
+- [X] Content switcher
 - [x] DataTable
     * [x] Cell select
-    * [ ] Row / Column select
-    * [ ] API to update cells / rows 
+    * [x] Row / Column select
+    * [x] API to update cells / rows
     * [ ] Lazy loading API
 - [ ] Date picker
 - [ ] Drop-down menus
@@ -58,22 +58,25 @@ Widgets are key to making user friendly interfaces. The builtin widgets should c
     * [ ] Braille
     * [ ] Sixels, and other image extensions
 - [x] Input
-    * [ ] Validation
+    * [x] Validation
     * [ ] Error / warning states
     * [ ] Template types: IP address, physical units (weight, volume), currency, credit card etc
-- [ ] Markdown viewer (more dynamic than Rich markdown, with scrollable code areas / collapsible sections)
+- [X] Select control (pull-down)
+- [X] Markdown viewer
+    * [ ] Collapsible sections
+    * [ ] Custom widgets
 - [ ] Plots
     * [ ] bar chart
     * [ ] line chart
     * [ ] Candlestick chars
-- [ ] Progress bars
+- [X] Progress bars
     * [ ] Style variants (solid, thin etc)
-- [ ] Radio boxes
-- [ ] Spark-lines
-- [ ] Tabs
+- [X] Radio boxes
+- [X] Spark-lines
+- [X] Switch
+- [X] Tabs
 - [ ] TextArea (multi-line input)
     * [ ] Basic controls
     * [ ] Indentation guides
     * [ ] Smart features for various languages
     * [ ] Syntax highlighting
-    

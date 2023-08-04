@@ -15,6 +15,9 @@ By the end of this page you should have a solid understanding of app development
 
     &mdash; **Will McGugan** (creator of Rich and Textual)
 
+## Video series
+
+This tutorial has an accompanying [video series](https://www.youtube.com/playlist?list=PLHhDR_Q5Me1MxO4LmfzMNNQyKfwa275Qe) which covers the same content.
 
 ## Stopwatch Application
 
@@ -25,7 +28,7 @@ This will be a simple yet **fully featured** app &mdash; you could distribute th
 Here's what the finished app will look like:
 
 
-```{.textual path="docs/examples/tutorial/stopwatch.py" press="tab,enter,_,tab,enter,_,tab,_,enter,_,tab,enter,_,_"}
+```{.textual path="docs/examples/tutorial/stopwatch.py" title="stopwatch.py" press="tab,enter,tab,enter,tab,enter,tab,enter"}
 ```
 
 ### Get the code
@@ -90,12 +93,12 @@ The first step in building a Textual app is to import and extend the `App` class
 If you run this code, you should see something like the following:
 
 
-```{.textual path="docs/examples/tutorial/stopwatch01.py"}
+```{.textual path="docs/examples/tutorial/stopwatch01.py" title="stopwatch01.py"}
 ```
 
 Hit the ++d++ key to toggle between light and dark mode.
 
-```{.textual path="docs/examples/tutorial/stopwatch01.py" press="d" title="StopwatchApp + dark"}
+```{.textual path="docs/examples/tutorial/stopwatch01.py" press="d" title="stopwatch01.py"}
 ```
 
 Hit ++ctrl+c++ to exit the app and return to the command prompt.
@@ -157,7 +160,7 @@ Let's add those to the app. Just a skeleton for now, we will add the rest of the
 --8<-- "docs/examples/tutorial/stopwatch02.py"
 ```
 
-We've imported two new widgets in this code: `Button`, which creates a clickable button, and `Static` which is a base class for a simple control. We've also imported `Container` from `textual.containers` which (as the name suggests) is a `Widget` which contains other widgets.
+We've imported two new widgets in this code: `Button`, which creates a clickable button, and `Static` which is a base class for a simple control. We've also imported `ScrollableContainer` from `textual.containers` which (as the name suggests) is a `Widget` which contains other widgets.
 
 We've defined an empty `TimeDisplay` widget by extending `Static`. We will flesh this out later.
 
@@ -174,7 +177,7 @@ The Button constructor takes a label to be displayed in the button (`"Start"`, `
 
 To add widgets to our application we first need to yield them from the app's `compose()` method:
 
-The new line in `Stopwatch.compose()` yields a single `Container` object which will create a scrolling list of stopwatches. When classes contain other widgets (like `Container`) they will typically accept their child widgets as positional arguments. We want to start the app with three stopwatches, so we construct three `Stopwatch` instances and pass them to the container's constructor.
+The new line in `StopwatchApp.compose()` yields a single `ScrollableContainer` object which will create a scrolling list of stopwatches. When classes contain other widgets (like `ScrollableContainer`) they will typically accept their child widgets as positional arguments. We want to start the app with three stopwatches, so we construct three `Stopwatch` instances and pass them to the container's constructor.
 
 
 ### The unstyled app
@@ -339,7 +342,7 @@ The `on_button_pressed` method is an *event handler*. Event handlers are methods
 
 If you run `stopwatch04.py` now you will be able to toggle between the two states by clicking the first button:
 
-```{.textual path="docs/examples/tutorial/stopwatch04.py" title="stopwatch04.py" press="tab,tab,tab,_,enter,_,_,_"}
+```{.textual path="docs/examples/tutorial/stopwatch04.py" title="stopwatch04.py" press="tab,tab,tab,enter"}
 ```
 
 ## Reactive attributes
@@ -348,11 +351,11 @@ A recurring theme in Textual is that you rarely need to explicitly update a widg
 
 You can declare a reactive attribute with [reactive][textual.reactive.reactive]. Let's use this feature to create a timer that displays elapsed time and keeps it updated.
 
-```python title="stopwatch05.py" hl_lines="1 5 12-27"
+```python title="stopwatch05.py" hl_lines="1 5 12-27 45"
 --8<-- "docs/examples/tutorial/stopwatch05.py"
 ```
 
-We have added two reactive attributes: `start_time` will contain the time in seconds when the stopwatch was started, and `time` will contain the time to be displayed on the `Stopwatch`.
+We have added two reactive attributes to the `TimeDisplay` widget: `start_time` will contain the time (in seconds) the stopwatch was started, and `time` will contain the time to be displayed on the `Stopwatch`.
 
 Both attributes will be available on `self` as if you had assigned them in `__init__`. If you write to either of these attributes the widget will update automatically.
 
@@ -360,16 +363,17 @@ Both attributes will be available on `self` as if you had assigned them in `__in
 
     The `monotonic` function in this example is imported from the standard library `time` module. It is similar to `time.time` but won't go backwards if the system clock is changed.
 
-The first argument to `reactive` may be a default value or a callable that returns the default value. The default for `start_time` is `monotonic`. When `TimeDisplay` is added to the app, the `start_time` attribute will be set to the result of `monotonic()`.
+The first argument to `reactive` may be a default value for the attribute or a callable that returns a default value.
+We set the default for `start_time` to the `monotonic` function which will be called to initialize the attribute with the current time when the `TimeDisplay` is added to the app.
+The `time` attribute has a simple float as the default, so `self.time` will be initialized to `0`.
 
-The `time` attribute has a simple float as the default value, so `self.time` will be `0` on start.
 
+The `on_mount` method is an event handler called when the widget is first added to the application (or _mounted_ in Textual terminology). In this method we call [set_interval()][textual.message_pump.MessagePump.set_interval] to create a timer which calls `self.update_time` sixty times a second. This `update_time` method calculates the time elapsed since the widget started and assigns it to `self.time` &mdash; which brings us to one of Reactive's super-powers.
 
-The `on_mount` method is an event handler called when the widget is first added to the application (or _mounted_). In this method we call [set_interval()][textual.message_pump.MessagePump.set_interval] to create a timer which calls `self.update_time` sixty times a second. This `update_time` method calculates the time elapsed since the widget started and assigns it to `self.time`. Which brings us to one of Reactive's super-powers.
+If you implement a method that begins with `watch_` followed by the name of a reactive attribute, then the method will be called when the attribute is modified.
+Such methods are known as *watch methods*.
 
-If you implement a method that begins with `watch_` followed by the name of a reactive attribute (making it a _watch method_), that method will be called when the attribute is modified.
-
-Because `watch_time` watches the `time` attribute, when we update `self.time` 60 times a second we also implicitly call `watch_time` which converts the elapsed time in to a string and updates the widget with a call to `self.update`.
+Because `watch_time` watches the `time` attribute, when we update `self.time` 60 times a second we also implicitly call `watch_time` which converts the elapsed time to a string and updates the widget with a call to `self.update`. Because this happens automatically, we don't need to pass in an initial argument to `TimeDisplay`.
 
 The end result is that the `Stopwatch` widgets show the time elapsed since the widget was created:
 
@@ -421,7 +425,7 @@ This code supplies missing features and makes our app useful. We've made the fol
 
 If you run `stopwatch06.py` you will be able to use the stopwatches independently.
 
-```{.textual path="docs/examples/tutorial/stopwatch06.py" title="stopwatch06.py" press="tab,enter,_,_,tab,enter,_,tab"}
+```{.textual path="docs/examples/tutorial/stopwatch06.py" title="stopwatch06.py" press="tab,enter,tab,enter,tab"}
 ```
 
 The only remaining feature of the Stopwatch app left to implement is the ability to add and remove stopwatches.
@@ -438,7 +442,7 @@ Let's use these methods to implement adding and removing stopwatches to our app.
 
 Here's a summary of the changes:
 
-- The `Container` object in `StopWatchApp` grew a `"timers"` ID.
+- The `ScrollableContainer` object in `StopWatchApp` grew a `"timers"` ID.
 - Added `action_add_stopwatch` to add a new stopwatch.
 - Added `action_remove_stopwatch` to remove a stopwatch.
 - Added keybindings for the actions.
@@ -449,7 +453,7 @@ The `action_remove_stopwatch` function calls [query()][textual.dom.DOMNode.query
 
 If you run `stopwatch.py` now you can add a new stopwatch with the ++a++ key and remove a stopwatch with ++r++.
 
-```{.textual path="docs/examples/tutorial/stopwatch.py" press="d,a,a,a,a,a,a,a,tab,enter,_,_,_,_,tab,_"}
+```{.textual path="docs/examples/tutorial/stopwatch.py" title="stopwatch.py" press="d,a,a,a,a,a,a,a,tab,enter,tab"}
 ```
 
 ## What next?

@@ -14,19 +14,29 @@ The example below creates a simple tree to navigate the current working director
 --8<-- "docs/examples/widgets/directory_tree.py"
 ```
 
+## Filtering
+
+There may be times where you want to filter what appears in the
+`DirectoryTree`. To do this inherit from `DirectoryTree` and implement your
+own version of the `filter_paths` method. It should take an iterable of
+Python `Path` objects, and return those that pass the filter. For example,
+if you wanted to take the above code an filter out all of the "hidden" files
+and directories:
+
+=== "Output"
+
+    ```{.textual path="docs/examples/widgets/directory_tree_filtered.py"}
+    ```
+
+=== "directory_tree_filtered.py"
+
+    ~~~python
+    --8<-- "docs/examples/widgets/directory_tree_filtered.py"
+    ~~~
+
 ## Messages
 
-### FileSelected
-
-The `DirectoryTree.FileSelected` message is sent when the user selects a file in the tree
-
-- [x] Bubbles
-
-#### Attributes
-
-| attribute | type  | purpose           |
-| --------- | ----- | ----------------- |
-| `path`    | `str` | Path of the file. |
+- [DirectoryTree.FileSelected][textual.widgets.DirectoryTree.FileSelected]
 
 ## Reactive Attributes
 
@@ -36,8 +46,24 @@ The `DirectoryTree.FileSelected` message is sent when the user selects a file in
 | `show_guides` | `bool` | `True`  | Show guide lines between levels.                |
 | `guide_depth` | `int`  | `4`     | Amount of indentation between parent and child. |
 
+## Component Classes
+
+The directory tree widget provides the following component classes:
+
+::: textual.widgets.DirectoryTree.COMPONENT_CLASSES
+    options:
+      show_root_heading: false
+      show_root_toc_entry: false
 
 ## See Also
 
-* [DirectoryTree][textual.widgets.DirectoryTree] code reference
 * [Tree][textual.widgets.Tree] code reference
+
+
+
+---
+
+
+::: textual.widgets.DirectoryTree
+    options:
+      heading_level: 2

@@ -1,15 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import sys
 from fractions import Fraction
-from typing import cast, Sequence
+from typing import Sequence, cast
 
-
-if sys.version_info >= (3, 8):
-    from typing import Protocol
-else:
-    from typing_extensions import Protocol  # pragma: no cover
+from typing_extensions import Protocol
 
 
 class EdgeProtocol(Protocol):
@@ -40,11 +35,11 @@ def layout_resolve(total: int, edges: Sequence[EdgeProtocol]) -> list[int]:
     clip the rows that would overflow the screen height.
 
     Args:
-        total (int): Total number of characters.
-        edges (Sequence[Edge]): Edges within total space.
+        total: Total number of characters.
+        edges: Edges within total space.
 
     Returns:
-        list[int]: Number of characters for each edge.
+        Number of characters for each edge.
     """
     # Size of edge or None for yet to be determined
     sizes = [(edge.size or None) for edge in edges]

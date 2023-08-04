@@ -1,5 +1,5 @@
+import asyncio
 import platform
-from asyncio import get_running_loop
 from asyncio import sleep as asyncio_sleep
 from time import monotonic, perf_counter
 
@@ -24,9 +24,9 @@ if WINDOWS:
         """Sleep for a given number of seconds.
 
         Args:
-            secs (float): Number of seconds to sleep for.
+            secs: Number of seconds to sleep for.
         """
-        await get_running_loop().run_in_executor(None, win_sleep, secs)
+        await asyncio.create_task(win_sleep(secs))
 
 else:
 
@@ -34,7 +34,7 @@ else:
         """Sleep for a given number of seconds.
 
         Args:
-            secs (float): Number of seconds to sleep for.
+            secs: Number of seconds to sleep for.
         """
         # From practical experiments, asyncio.sleep sleeps for at least half a millisecond too much
         # Presumably there is overhead asyncio itself which accounts for this
@@ -42,3 +42,12 @@ else:
         sleep_for = secs - 0.0005
         if sleep_for > 0:
             await asyncio_sleep(sleep_for)
+
+
+get_time = time
+"""Get the current wall clock (monotonic) time.
+
+Returns:
+    The value (in fractional seconds) of a monotonic clock,
+    i.e. a clock that cannot go backwards.
+"""

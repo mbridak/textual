@@ -134,8 +134,8 @@ exceeds the available horizontal space in the parent container.
 
 ## Utility containers
 
-Textual comes with several "container" widgets.
-These are [Vertical][textual.containers.Vertical], [Horizontal][textual.containers.Horizontal], and [Grid][textual.containers.Grid] which have the corresponding layout.
+Textual comes with [several "container" widgets][textual.containers].
+Among them, we have [Vertical][textual.containers.Vertical], [Horizontal][textual.containers.Horizontal], and [Grid][textual.containers.Grid] which have the corresponding layout.
 
 The example below shows how we can combine these containers to create a simple 2x2 grid.
 Inside a single `Horizontal` container, we place two `Vertical` containers.
@@ -159,7 +159,50 @@ In other words, we have a single row containing two columns.
     ```
 
 You may be tempted to use many levels of nested utility containers in order to build advanced, grid-like layouts.
-However, Textual comes with a more powerful mechanism for achieving this known as _grid layout_, which we'll discuss next.
+However, Textual comes with a more powerful mechanism for achieving this known as _grid layout_, which we'll discuss below.
+
+## Composing with context managers
+
+In the previous section, we've shown how you add children to a container (such as `Horizontal` and `Vertical`) using positional arguments.
+It's fine to do it this way, but Textual offers a simplified syntax using [context managers](https://docs.python.org/3/reference/datamodel.html#context-managers), which is generally easier to write and edit.
+
+When composing a widget, you can introduce a container using Python's `with` statement.
+Any widgets yielded within that block are added as a child of the container.
+
+Let's update the [utility containers](#utility-containers) example to use the context manager approach.
+
+=== "utility_containers_using_with.py"
+
+    !!! note
+
+        This code uses context managers to compose widgets.
+
+    ```python hl_lines="10-16"
+    --8<-- "docs/examples/guide/layout/utility_containers_using_with.py"
+    ```
+
+=== "utility_containers.py"
+
+    !!! note
+
+        This is the original code using positional arguments.
+
+    ```python hl_lines="10-21"
+    --8<-- "docs/examples/guide/layout/utility_containers.py"
+    ```
+
+=== "utility_containers.css"
+
+    ```sass
+    --8<-- "docs/examples/guide/layout/utility_containers.css"
+    ```
+
+=== "Output"
+
+    ```{.textual path="docs/examples/guide/layout/utility_containers_using_with.py"}
+    ```
+
+Note how the end result is the same, but the code with context managers is a little easier to read. It is up to you which method you want to use, and you can mix context managers with positional arguments if you like!
 
 ## Grid
 
@@ -401,7 +444,7 @@ The code below shows a simple sidebar implementation.
 
 === "Output"
 
-    ```{.textual path="docs/examples/guide/layout/dock_layout1_sidebar.py" press="pagedown,down,down,_,_,_,_,_"}
+    ```{.textual path="docs/examples/guide/layout/dock_layout1_sidebar.py" press="pagedown,down,down"}
     ```
 
 === "dock_layout1_sidebar.py"
@@ -425,7 +468,7 @@ This new sidebar is double the width of the one previous one, and has a `deeppin
 
 === "Output"
 
-    ```{.textual path="docs/examples/guide/layout/dock_layout2_sidebar.py" press="pagedown,down,down,_,_,_,_,_"}
+    ```{.textual path="docs/examples/guide/layout/dock_layout2_sidebar.py" press="pagedown,down,down"}
     ```
 
 === "dock_layout2_sidebar.py"

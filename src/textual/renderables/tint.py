@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from rich.console import ConsoleOptions, Console, RenderResult, RenderableType
+from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
 from rich.segment import Segment
 from rich.style import Style
 
@@ -12,12 +12,16 @@ from ..color import Color
 class Tint:
     """Applies a color on top of an existing renderable."""
 
-    def __init__(self, renderable: RenderableType, color: Color) -> None:
+    def __init__(
+        self,
+        renderable: RenderableType,
+        color: Color,
+    ) -> None:
         """Wrap a renderable to apply a tint color.
 
         Args:
-            renderable (RenderableType): A renderable.
-            color (Color): A color (presumably with alpha).
+            renderable: A renderable.
+            color: A color (presumably with alpha).
         """
         self.renderable = renderable
         self.color = color
@@ -29,12 +33,11 @@ class Tint:
         """Apply tint to segments.
 
         Args:
-            segments (Iterable[Segment]): Incoming segments.
-            color (Color): Color of tint.
+            segments: Incoming segments.
+            color: Color of tint.
 
         Returns:
-            Iterable[Segment]: Segments with applied tint.
-
+            Segments with applied tint.
         """
         from_rich_color = Color.from_rich_color
         style_from_color = Style.from_color

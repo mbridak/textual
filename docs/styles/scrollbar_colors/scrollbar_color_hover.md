@@ -1,6 +1,6 @@
 # Scrollbar-color-hover
 
-The `scrollbar-color-hover` sets the color of the scrollbar when the cursor is over it.
+The `scrollbar-color-hover` style sets the color of the scrollbar when the cursor is over it.
 
 ## Syntax
 
@@ -8,7 +8,7 @@ The `scrollbar-color-hover` sets the color of the scrollbar when the cursor is o
 <a href="./scrollbar_color_hover">scrollbar-color-hover</a>: <a href="../../css_types/color">&lt;color&gt;</a> [<a href="../../css_types/percentage">&lt;percentage&gt;</a>];
 --8<-- "docs/snippets/syntax_block_end.md"
 
-`scrollbar-color-hover` accepts a [`<color>`](../../../css_types/color) (with an optional transparency level defined by a [`<percentage>`](../../../css_types/percentage)) that is used to define the color of a scrollbar when the cursor is over it.
+`scrollbar-color-hover` accepts a [`<color>`](../../../css_types/color) (with an optional opacity level defined by a [`<percentage>`](../../../css_types/percentage)) that is used to define the color of a scrollbar when the cursor is over it.
 
 ## Example
 

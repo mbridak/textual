@@ -20,13 +20,13 @@ The `action_set_background` method is an action which sets the background of the
 
 Although it is possible (and occasionally useful) to call action methods in this way, they are intended to be parsed from an _action string_. For instance, the string `"set_background('red')"` is an action string which would call `self.action_set_background('red')`.
 
-The following example replaces the immediate call with a call to [action()][textual.widgets.Widget.action] which parses an action string and dispatches it to the appropriate method.
+The following example replaces the immediate call with a call to [run_action()][textual.widgets.Widget.run_action] which parses an action string and dispatches it to the appropriate method.
 
 ```python title="actions02.py" hl_lines="9-11"
 --8<-- "docs/examples/guide/actions/actions02.py"
 ```
 
-Note that the `action()` method is a coroutine so `on_key` needs to be prefixed with the `async` keyword.
+Note that the `run_action()` method is a coroutine so `on_key` needs to be prefixed with the `async` keyword.
 
 You will not typically need this in a real app as Textual will run actions in links or key bindings. Before we discuss these, let's have a closer look at the syntax for action strings.
 
@@ -36,7 +36,7 @@ Action strings have a simple syntax, which for the most part replicates Python's
 
 !!! important
 
-    As much as they *look* like Python code, Textual does **not** call Python's `eval` function or similar to compile action strings.
+    As much as they *look* like Python code, Textual does **not** call Python's `eval` function to compile action strings.
 
 Action strings have the following format:
 
@@ -50,7 +50,7 @@ Action strings have the following format:
 
 ### Parameters
 
-If the action string contains parameters, these must be valid Python literals. Which means you can include numbers, strings, dicts, lists etc. but you can't include variables or references to any other python symbol.
+If the action string contains parameters, these must be valid Python literals. Which means you can include numbers, strings, dicts, lists etc. but you can't include variables or references to any other Python symbols.
 
 Consequently `"set_background('blue')"` is a valid action string, but `"set_background(new_color)"` is not &mdash; because `new_color` is a variable and not a literal.
 
@@ -126,9 +126,18 @@ In the previous example if you wanted a link to set the background on the app ra
 
 Textual supports the following builtin actions which are defined on the app.
 
+- [action_add_class][textual.app.App.action_add_class]
+- [action_back][textual.app.App.action_back]
 - [action_bell][textual.app.App.action_bell]
-- [action_push_screen][textual.app.App.action_push_screen]
+- [action_check_bindings][textual.app.App.action_check_bindings]
+- [action_focus][textual.app.App.action_focus]
+- [action_focus_next][textual.app.App.action_focus_next]
+- [action_focus_previous][textual.app.App.action_focus_previous]
 - [action_pop_screen][textual.app.App.action_pop_screen]
-- [action_switch_screen][textual.app.App.action_switch_screen]
+- [action_push_screen][textual.app.App.action_push_screen]
+- [action_quit][textual.app.App.action_quit]
+- [action_remove_class][textual.app.App.action_remove_class]
 - [action_screenshot][textual.app.App.action_screenshot]
+- [action_switch_screen][textual.app.App.action_switch_screen]
+- [action_toggle_class][textual.app.App.action_toggle_class]
 - [action_toggle_dark][textual.app.App.action_toggle_dark]

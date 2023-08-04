@@ -3,8 +3,9 @@ from rich.segment import Segment
 from rich.style import Style
 
 from textual._segment_tools import NoCellPositionForIndex
+from textual.color import Color
+from textual.filter import Monochrome
 from textual.strip import Strip
-from textual._filter import Monochrome
 
 
 def test_cell_length() -> None:
@@ -83,6 +84,14 @@ def test_adjust_cell_length():
         )
 
 
+def test_extend_cell_length():
+    strip = Strip([Segment("foo"), Segment("bar")])
+    assert strip.extend_cell_length(3).text == "foobar"
+    assert strip.extend_cell_length(6).text == "foobar"
+    assert strip.extend_cell_length(7).text == "foobar "
+    assert strip.extend_cell_length(9).text == "foobar   "
+
+
 def test_simplify():
     assert Strip([Segment("foo"), Segment("bar")]).simplify() == Strip(
         [Segment("foobar")]
@@ -94,7 +103,7 @@ def test_apply_filter():
     expected = Strip([Segment("foo", Style.parse("#1b1b1b"))])
     print(repr(strip))
     print(repr(expected))
-    assert strip.apply_filter(Monochrome()) == expected
+    assert strip.apply_filter(Monochrome(), Color(0, 0, 0)) == expected
 
 
 def test_style_links():
@@ -173,3 +182,9 @@ def test_index_cell_position_index_too_large():
     strip = Strip([Segment("abcdef"), Segment("ghi")])
     with pytest.raises(NoCellPositionForIndex):
         strip.index_to_cell_position(100)
+
+
+def test_text():
+    assert Strip([]).text == ""
+    assert Strip([Segment("foo")]).text == "foo"
+    assert Strip([Segment("foo"), Segment("bar")]).text == "foobar"

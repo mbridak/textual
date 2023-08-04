@@ -2,27 +2,9 @@ Screen {
     align: center middle;
 }
 
-.container {
+VerticalScroll {
+    width: auto;
     height: auto;
-    width: auto;
-}
-
-Checkbox {
-    height: auto;
-    width: auto;
-}
-
-.label {
-    height: 3;
-    content-align: center middle;
-    width: auto;
-}
-
-#custom-design {
-    background: darkslategrey;
-}
-
-#custom-design > .checkbox--switch {
-    color: dodgerblue;
-    background: darkslateblue;
+    background: $boost;
+    padding: 2;
 }

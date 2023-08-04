@@ -1,20 +1,44 @@
 from __future__ import annotations
 
 import inspect
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 import rich.repr
 from rich.console import RenderableType
 
-__all__ = ["log", "panic"]
-
-
+from . import constants
 from ._context import active_app
 from ._log import LogGroup, LogVerbosity
-from ._typing import TypeAlias
+from ._on import on
+from ._work_decorator import work
+
+if TYPE_CHECKING:
+    from typing_extensions import TypeAlias
+
+__all__ = [
+    "__version__",  # type: ignore
+    "log",
+    "on",
+    "panic",
+    "work",
+]
 
 
 LogCallable: TypeAlias = "Callable"
+
+
+def __getattr__(name: str) -> str:
+    """Lazily get the version from whatever API is available."""
+    if name == "__version__":
+        try:
+            from importlib.metadata import version
+        except ImportError:
+            import pkg_resources
+
+            return pkg_resources.get_distribution("textual").version
+        else:
+            return version("textual")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class LoggerError(Exception):
@@ -46,10 +70,23 @@ class Logger:
             print_args = (*args, *[f"{key}={value!r}" for key, value in kwargs.items()])
             print(*print_args)
             return
+        if constants.LOG_FILE:
+            output = " ".join(str(arg) for arg in args)
+            if kwargs:
+                key_values = " ".join(
+                    f"{key}={value!r}" for key, value in kwargs.items()
+                )
+                output = f"{output} {key_values}" if output else key_values
+
+            with open(constants.LOG_FILE, "a") as log_file:
+                print(output, file=log_file)
         if app.devtools is None or not app.devtools.is_connected:
             return
 
-        previous_frame = inspect.currentframe().f_back
+        current_frame = inspect.currentframe()
+        assert current_frame is not None
+        previous_frame = current_frame.f_back
+        assert previous_frame is not None
         caller = inspect.getframeinfo(previous_frame)
 
         _log = self._log or app._log
@@ -70,10 +107,10 @@ class Logger:
         """Get a new logger with selective verbosity.
 
         Args:
-            verbose (bool): True to use HIGH verbosity, otherwise NORMAL.
+            verbose: True to use HIGH verbosity, otherwise NORMAL.
 
         Returns:
-            Logger: New logger.
+            New logger.
         """
         verbosity = LogVerbosity.HIGH if verbose else LogVerbosity.NORMAL
         return Logger(self._log, self._group, verbosity)
@@ -112,6 +149,16 @@ class Logger:
     def system(self) -> Logger:
         """Logs system information."""
         return Logger(self._log, LogGroup.SYSTEM)
+
+    @property
+    def logging(self) -> Logger:
+        """Logs from stdlib logging module."""
+        return Logger(self._log, LogGroup.LOGGING)
+
+    @property
+    def worker(self) -> Logger:
+        """Logs worker information."""
+        return Logger(self._log, LogGroup.WORKER)
 
 
 log = Logger(None)

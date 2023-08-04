@@ -4,7 +4,7 @@ import os
 from collections import defaultdict
 from operator import itemgetter
 from pathlib import Path, PurePath
-from typing import Iterable, NamedTuple, cast
+from typing import Iterable, NamedTuple, Sequence, cast
 
 import rich.repr
 from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
@@ -15,7 +15,6 @@ from rich.style import Style
 from rich.syntax import Syntax
 from rich.text import Text
 
-from .. import messages
 from ..dom import DOMNode
 from ..widget import Widget
 from .errors import StylesheetError
@@ -78,7 +77,7 @@ class StylesheetErrors:
                     f"{path.absolute() if path else filename}:{line_no}:{col_no}"
                 )
                 link_style = Style(
-                    link=f"file://{path.absolute()}",
+                    link=f"file://{path.absolute()}" if path else None,
                     color="red",
                     bold=True,
                     italic=True,
@@ -109,8 +108,8 @@ class CssSource(NamedTuple):
     vs widget-level stylesheets.
 
     Args:
-        content (str): The CSS as a string.
-        is_defaults (bool): True if the CSS is default (i.e. that defined at the widget level).
+        content: The CSS as a string.
+        is_defaults: True if the CSS is default (i.e. that defined at the widget level).
             False if it's user CSS (which will override the defaults).
     """
 
@@ -128,6 +127,7 @@ class Stylesheet:
         self.__variable_tokens: dict[str, list[Token]] | None = None
         self.source: dict[str, CssSource] = {}
         self._require_parse = False
+        self._invalid_css: set[str] = set()
 
     def __rich_repr__(self) -> rich.repr.Result:
         yield list(self.source.keys())
@@ -143,7 +143,7 @@ class Stylesheet:
         """List of rule sets.
 
         Returns:
-            list[RuleSet]: List of rules sets for this stylesheet.
+            List of rules sets for this stylesheet.
         """
         if self._require_parse:
             self.parse()
@@ -156,7 +156,7 @@ class Stylesheet:
         """Structure that maps a selector on to a list of rules.
 
         Returns:
-            dict[str, list[RuleSet]]: Mapping of selector to rule sets.
+            Mapping of selector to rule sets.
         """
         if self._rules_map is None:
             rules_map: dict[str, list[RuleSet]] = defaultdict(list)
@@ -174,7 +174,7 @@ class Stylesheet:
         """Create a copy of this stylesheet.
 
         Returns:
-            Stylesheet: New stylesheet.
+            New stylesheet.
         """
         stylesheet = Stylesheet(variables=self._variables.copy())
         stylesheet.source = self.source.copy()
@@ -184,10 +184,11 @@ class Stylesheet:
         """Set CSS variables.
 
         Args:
-            variables (dict[str, str]): A mapping of name to variable.
+            variables: A mapping of name to variable.
         """
         self._variables = variables
         self.__variable_tokens = None
+        self._invalid_css = set()
 
     def _parse_rules(
         self,
@@ -200,16 +201,16 @@ class Stylesheet:
 
         Args:
             is_default_rules:
-            css (str): String containing Textual CSS.
-            path (str | PurePath): Path to CSS or unique identifier
-            is_default_rules (bool): True if the rules we're extracting are
+            css: String containing Textual CSS.
+            path: Path to CSS or unique identifier
+            is_default_rules: True if the rules we're extracting are
                 default (i.e. in Widget.DEFAULT_CSS) rules. False if they're from user defined CSS.
 
         Raises:
             StylesheetError: If the CSS is invalid.
 
         Returns:
-            list[RuleSet]: List of RuleSets.
+            List of RuleSets.
         """
         try:
             rules = list(
@@ -232,7 +233,7 @@ class Stylesheet:
         """Read Textual CSS file.
 
         Args:
-            filename (str | PurePath): filename of CSS.
+            filename: Filename of CSS.
 
         Raises:
             StylesheetError: If the CSS could not be read.
@@ -248,11 +249,11 @@ class Stylesheet:
         self.source[str(path)] = CssSource(css, False, 0)
         self._require_parse = True
 
-    def read_all(self, paths: list[PurePath]) -> None:
+    def read_all(self, paths: Sequence[PurePath]) -> None:
         """Read multiple CSS files, in order.
 
         Args:
-            paths (list[PurePath]): The paths of the CSS files to read, in order.
+            paths: The paths of the CSS files to read, in order.
 
         Raises:
             StylesheetError: If the CSS could not be read.
@@ -260,6 +261,14 @@ class Stylesheet:
         """
         for path in paths:
             self.read(path)
+
+    def has_source(self, path: str | PurePath) -> bool:
+        """Check if the stylesheet has this CSS source already.
+
+        Returns:
+            Whether the stylesheet is aware of this CSS source or not.
+        """
+        return str(path) in self.source
 
     def add_source(
         self,
@@ -271,12 +280,11 @@ class Stylesheet:
         """Parse CSS from a string.
 
         Args:
-            css (str): String with CSS source.
-            path (str | PurePath, optional): The path of the source if a file, or some other identifier.
-                Defaults to None.
-            is_default_css (bool): True if the CSS is defined in the Widget, False if the CSS is defined
+            css: String with CSS source.
+            path: The path of the source if a file, or some other identifier.
+            is_default_css: True if the CSS is defined in the Widget, False if the CSS is defined
                 in a user stylesheet.
-            tie_breaker (int): Integer representing the priority of this source.
+            tie_breaker: Integer representing the priority of this source.
 
         Raises:
             StylesheetError: If the CSS could not be read.
@@ -304,10 +312,20 @@ class Stylesheet:
         """
         rules: list[RuleSet] = []
         add_rules = rules.extend
+
         for path, (css, is_default_rules, tie_breaker) in self.source.items():
-            css_rules = self._parse_rules(
-                css, path, is_default_rules=is_default_rules, tie_breaker=tie_breaker
-            )
+            if css in self._invalid_css:
+                continue
+            try:
+                css_rules = self._parse_rules(
+                    css,
+                    path,
+                    is_default_rules=is_default_rules,
+                    tie_breaker=tie_breaker,
+                )
+            except Exception:
+                self._invalid_css.add(css)
+                raise
             if any(rule.errors for rule in css_rules):
                 error_renderable = StylesheetErrors(css_rules)
                 raise StylesheetParseError(error_renderable)
@@ -322,7 +340,6 @@ class Stylesheet:
         Raises:
             StylesheetError: If the CSS could not be read.
             StylesheetParseError: If the CSS is invalid.
-
         """
         # Do this in a fresh Stylesheet so if there are errors we don't break self.
         stylesheet = Stylesheet(variables=self._variables)
@@ -353,12 +370,12 @@ class Stylesheet:
         """Apply the stylesheet to a DOM node.
 
         Args:
-            node (DOMNode): The ``DOMNode`` to apply the stylesheet to.
-                Applies the styles defined in this ``Stylesheet`` to the node.
+            node: The `DOMNode` to apply the stylesheet to.
+                Applies the styles defined in this `Stylesheet` to the node.
                 If the same rule is defined multiple times for the node (e.g. multiple
                 classes modifying the same CSS property), then only the most specific
                 rule will be applied.
-            animate (bool, optional): Animate changed rules. Defaults to ``False``.
+            animate: Animate changed rules.
         """
         # Dictionary of rule attribute names e.g. "text_background" to list of tuples.
         # The tuples contain the rule specificity, and the value for that rule.
@@ -406,12 +423,25 @@ class Stylesheet:
         )
         self.replace_rules(node, node_rules, animate=animate)
 
-        node._component_styles.clear()
-        for component in node.COMPONENT_CLASSES:
-            virtual_node = DOMNode(classes=component)
-            virtual_node._attach(node)
-            self.apply(virtual_node, animate=False)
-            node._component_styles[component] = virtual_node.styles
+        component_classes = node._get_component_classes()
+        if component_classes:
+            # Create virtual nodes that exist to extract styles
+            refresh_node = False
+            old_component_styles = node._component_styles.copy()
+            node._component_styles.clear()
+            for component in sorted(component_classes):
+                virtual_node = DOMNode(classes=component)
+                virtual_node._attach(node)
+                self.apply(virtual_node, animate=False)
+                if (
+                    not refresh_node
+                    and old_component_styles.get(component) != virtual_node.styles
+                ):
+                    # If the styles have changed we want to refresh the node
+                    refresh_node = True
+                node._component_styles[component] = virtual_node.styles
+            if refresh_node:
+                node.refresh()
 
     @classmethod
     def replace_rules(
@@ -420,9 +450,9 @@ class Stylesheet:
         """Replace style rules on a node, animating as required.
 
         Args:
-            node (DOMNode): A DOM node.
-            rules (RulesMap): Mapping of rules.
-            animate (bool, optional): Enable animation. Defaults to False.
+            node: A DOM node.
+            rules: Mapping of rules.
+            animate: Enable animation.
         """
 
         # Alias styles and base styles
@@ -449,6 +479,8 @@ class Stylesheet:
         get_new_render_rule = new_render_rules.get
 
         if animate:
+            animator = node.app.animator
+            base = node.styles.base
             for key in modified_rule_keys:
                 # Get old and new render rules
                 old_render_value = get_current_render_rule(key)
@@ -456,13 +488,18 @@ class Stylesheet:
                 # Get new rule value (may be None)
                 new_value = rules.get(key)
 
-                # Check if this can / should be animated
-                if is_animatable(key) and new_render_value != old_render_value:
+                # Check if this can / should be animated. It doesn't suffice to check
+                # if the current and target values are different because a previous
+                # animation may have been scheduled but may have not started yet.
+                if is_animatable(key) and (
+                    new_render_value != old_render_value
+                    or animator.is_being_animated(base, key)
+                ):
                     transition = new_styles._get_transition(key)
                     if transition is not None:
                         duration, easing, delay = transition
-                        node.app.animator.animate(
-                            node.styles.base,
+                        animator.animate(
+                            base,
                             key,
                             new_render_value,
                             final_value=new_value,
@@ -480,14 +517,14 @@ class Stylesheet:
             for key in modified_rule_keys:
                 setattr(base_styles, key, get_rule(key))
 
-        node.post_message_no_wait(messages.StylesUpdated(sender=node))
+        node.notify_style_update()
 
     def update(self, root: DOMNode, animate: bool = False) -> None:
         """Update styles on node and its children.
 
         Args:
-            root (DOMNode): Root note to update.
-            animate (bool, optional): Enable CSS animation. Defaults to False.
+            root: Root note to update.
+            animate: Enable CSS animation.
         """
 
         self.update_nodes(root.walk_children(with_self=True), animate=animate)
@@ -496,10 +533,9 @@ class Stylesheet:
         """Update styles for nodes.
 
         Args:
-            nodes (DOMNode): Nodes to update.
-            animate (bool, optional): Enable CSS animation. Defaults to False.
+            nodes: Nodes to update.
+            animate: Enable CSS animation.
         """
-
         rules_map = self.rules_map
         apply = self.apply
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from rich.console import ConsoleOptions, Console, RenderResult
+from rich.console import Console, ConsoleOptions, RenderResult
 from rich.traceback import Traceback
 
 from ._help_renderables import HelpText
@@ -27,13 +27,13 @@ class StyleValueError(ValueError):
     """Raised when the value of a style property is not valid
 
     Attributes:
-        help_text (HelpText | None): Optional HelpText to be rendered when this
+        help_text: Optional HelpText to be rendered when this
             error is raised.
     """
 
     def __init__(self, *args: object, help_text: HelpText | None = None):
         super().__init__(*args)
-        self.help_text = help_text
+        self.help_text: HelpText | None = help_text
 
     def __rich_console__(
         self, console: Console, options: ConsoleOptions

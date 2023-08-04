@@ -1,6 +1,6 @@
 # Dock
 
-The `dock` property is used to fix a widget to the edge of a container (which may be the entire terminal window).
+The `dock` style is used to fix a widget to the edge of a container (which may be the entire terminal window).
 
 ## Syntax
 
@@ -19,7 +19,7 @@ Notice that even though the content is scrolled, the sidebar remains fixed.
 
 === "Output"
 
-    ```{.textual path="docs/examples/guide/layout/dock_layout1_sidebar.py" press="pagedown,down,down,_,_,_,_,_"}
+    ```{.textual path="docs/examples/guide/layout/dock_layout1_sidebar.py" press="pagedown,down,down"}
     ```
 
 === "dock_layout1_sidebar.py"
@@ -68,10 +68,10 @@ dock: top;     /* Docks on the    top edge of the parent container. */
 ## Python
 
 ```python
-widget.styles.dock = bottom;  # Dock bottom.
-widget.styles.dock = left;    # Dock   left.
-widget.styles.dock = right;   # Dock  right.
-widget.styles.dock = top;     # Dock    top.
+widget.styles.dock = "bottom"  # Dock bottom.
+widget.styles.dock = "left"    # Dock   left.
+widget.styles.dock = "right"   # Dock  right.
+widget.styles.dock = "top"     # Dock    top.
 ```
 
 ## See also

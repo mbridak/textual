@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from importlib_metadata import version
 from pathlib import Path
 
+from importlib_metadata import version
 from rich import box
 from rich.console import RenderableType
 from rich.json import JSON
@@ -14,17 +14,17 @@ from rich.text import Text
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal
-from textual.reactive import reactive, watch
+from textual.containers import Container, Horizontal, ScrollableContainer
+from textual.reactive import reactive
 from textual.widgets import (
     Button,
-    Checkbox,
     DataTable,
     Footer,
     Header,
     Input,
+    RichLog,
     Static,
-    TextLog,
+    Switch,
 )
 
 from_markup = Text.from_markup
@@ -72,7 +72,6 @@ WELCOME_MD = """
 ## Textual Demo
 
 **Welcome**! Textual is a framework for creating sophisticated applications with the terminal.
-
 """
 
 
@@ -83,8 +82,6 @@ Textual is built on **Rich**, the popular Python library for advanced terminal o
 Add content to your Textual App with Rich *renderables* (this text is written in Markdown and formatted with Rich's Markdown class).
 
 Here are some examples:
-
-
 """
 
 CSS_MD = """
@@ -95,27 +92,7 @@ Textual uses Cascading Stylesheets (CSS) to create Rich interactive User Interfa
 - **Live editing** - see your changes without restarting the app!
 
 Here's an example of some CSS used in this app:
-
 """
-
-
-EXAMPLE_CSS = """\
-Screen {
-    layers: base overlay notes;
-    overflow: hidden;
-}
-
-Sidebar {
-    width: 40;
-    background: $panel;
-    transition: offset 500ms in_out_cubic;
-    layer: overlay;
-
-}
-
-Sidebar.-hidden {
-    offset-x: -100%;
-}"""
 
 DATA = {
     "foo": [
@@ -138,12 +115,11 @@ Build your own or use the builtin widgets.
 
 - **Input** Text / Password input.
 - **Button** Clickable button with a number of styles.
-- **Checkbox** A checkbox to toggle between states.
+- **Switch** A switch to toggle between states.
 - **DataTable** A spreadsheet-like widget for navigating data. Cells may contain text or Rich renderables.
 - **Tree** An generic tree with expandable nodes.
 - **DirectoryTree** A tree of file and folders.
 - *... many more planned ...*
-
 """
 
 
@@ -160,7 +136,6 @@ Here are some links. You can click these!
 
 
 Built with ♥  by [@click="app.open_link('https://www.textualize.io')"]Textualize.io[/]
-
 """
 
 
@@ -189,7 +164,7 @@ JSON_EXAMPLE = """{
 """
 
 
-class Body(Container):
+class Body(ScrollableContainer):
     pass
 
 
@@ -199,16 +174,16 @@ class Title(Static):
 
 class DarkSwitch(Horizontal):
     def compose(self) -> ComposeResult:
-        yield Checkbox(value=self.app.dark)
+        yield Switch(value=self.app.dark)
         yield Static("Dark mode toggle", classes="label")
 
     def on_mount(self) -> None:
-        watch(self.app, "dark", self.on_dark_change, init=False)
+        self.watch(self.app, "dark", self.on_dark_change, init=False)
 
-    def on_dark_change(self, dark: bool) -> None:
-        self.query_one(Checkbox).value = self.app.dark
+    def on_dark_change(self) -> None:
+        self.query_one(Switch).value = self.app.dark
 
-    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+    def on_switch_changed(self, event: Switch.Changed) -> None:
         self.app.dark = event.value
 
 
@@ -302,28 +277,28 @@ class Notification(Static):
         self.remove()
 
 
-class DemoApp(App):
+class DemoApp(App[None]):
     CSS_PATH = "demo.css"
     TITLE = "Textual Demo"
     BINDINGS = [
         ("ctrl+b", "toggle_sidebar", "Sidebar"),
         ("ctrl+t", "app.toggle_dark", "Toggle Dark mode"),
         ("ctrl+s", "app.screenshot()", "Screenshot"),
-        ("f1", "app.toggle_class('TextLog', '-hidden')", "Notes"),
+        ("f1", "app.toggle_class('RichLog', '-hidden')", "Notes"),
         Binding("ctrl+c,ctrl+q", "app.quit", "Quit", show=True),
     ]
 
     show_sidebar = reactive(False)
 
     def add_note(self, renderable: RenderableType) -> None:
-        self.query_one(TextLog).write(renderable)
+        self.query_one(RichLog).write(renderable)
 
     def compose(self) -> ComposeResult:
-        example_css = "\n".join(Path(self.css_path[0]).read_text().splitlines()[:50])
+        example_css = Path(self.css_path[0]).read_text()
         yield Container(
             Sidebar(classes="-hidden"),
             Header(show_clock=False),
-            TextLog(classes="-hidden", wrap=False, highlight=True, markup=True),
+            RichLog(classes="-hidden", wrap=False, highlight=True, markup=True),
             Body(
                 QuickAccess(
                     LocationLink("TOP", ".location-top"),
@@ -410,8 +385,8 @@ class DemoApp(App):
         """Save an SVG "screenshot". This action will save an SVG file containing the current contents of the screen.
 
         Args:
-            filename (str | None, optional): Filename of screenshot, or None to auto-generate. Defaults to None.
-            path (str, optional): Path to directory. Defaults to "./".
+            filename: Filename of screenshot, or None to auto-generate.
+            path: Path to directory.
         """
         self.bell()
         path = self.save_screenshot(filename, path)

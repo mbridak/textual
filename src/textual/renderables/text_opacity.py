@@ -3,7 +3,7 @@ from typing import Iterable, Tuple, cast
 
 from rich.cells import cell_len
 from rich.color import Color
-from rich.console import ConsoleOptions, Console, RenderResult, RenderableType
+from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
 from rich.segment import Segment
 from rich.style import Style
 
@@ -19,12 +19,12 @@ def _get_blended_style_cached(
     Cached because when a UI is static the opacity will be constant.
 
     Args:
-        bg_color (Color): Background color.
-        fg_color (Color): Foreground color.
-        opacity (float): Opacity.
+        bg_color: Background color.
+        fg_color: Foreground color.
+        opacity: Opacity.
 
     Returns:
-        Style: Resulting style.
+        Resulting style.
     """
     return Style.from_color(
         color=blend_colors(bg_color, fg_color, ratio=opacity),
@@ -39,8 +39,8 @@ class TextOpacity:
         """Wrap a renderable to blend foreground color into the background color.
 
         Args:
-            renderable (RenderableType): The RenderableType to manipulate.
-            opacity (float): The opacity as a float. A value of 1.0 means text is fully visible.
+            renderable: The RenderableType to manipulate.
+            opacity: The opacity as a float. A value of 1.0 means text is fully visible.
         """
         self.renderable = renderable
         self.opacity = opacity
@@ -52,17 +52,16 @@ class TextOpacity:
         """Apply opacity to segments.
 
         Args:
-            segments (Iterable[Segment]): Incoming segments.
-            opacity (float): Opacity to apply.
+            segments: Incoming segments.
+            opacity: Opacity to apply.
 
         Returns:
-            Iterable[Segment]: Segments with applied opacity.
-
+            Segments with applied opacity.
         """
         _Segment = Segment
         _from_color = Style.from_color
         if opacity == 0:
-            for text, style, control in cast(
+            for text, style, _control in cast(
                 # use Tuple rather than tuple so Python 3.7 doesn't complain
                 Iterable[Tuple[str, Style, object]],
                 segments,

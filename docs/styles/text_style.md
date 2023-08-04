@@ -1,6 +1,6 @@
 # Text-style
 
-The `text-style` sets the style for the text in a widget.
+The `text-style` style sets the style for the text in a widget.
 
 ## Syntax
 
@@ -35,7 +35,7 @@ Each of the three text panels has a different text style, respectively `bold`, `
 
 ### All text styles
 
-The next example shows all different styles on their own, as well as some combinations of styles in a single widget.
+The next example shows all different text styles on their own, as well as some combinations of styles in a single widget.
 
 === "Output"
 

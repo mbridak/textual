@@ -1,5 +1,4 @@
-from __future__ import annotations
-from __future__ import unicode_literals
+from __future__ import annotations, unicode_literals
 
 import pytest
 
@@ -9,7 +8,7 @@ from textual._cache import FIFOCache, LRUCache
 def test_lru_cache():
     cache = LRUCache(3)
 
-    assert str(cache) == "<LRUCache maxsize=3 hits=0 misses=0>"
+    assert str(cache) == "<LRUCache size=0 maxsize=3 hits=0 misses=0>"
 
     # insert some values
     cache["foo"] = 1
@@ -66,7 +65,7 @@ def test_lru_cache_hits():
     assert cache.hits == 3
     assert cache.misses == 2
 
-    assert str(cache) == "<LRUCache maxsize=4 hits=3 misses=2>"
+    assert str(cache) == "<LRUCache size=1 maxsize=4 hits=3 misses=2>"
 
 
 def test_lru_cache_get():
@@ -241,3 +240,22 @@ def test_fifo_cache_hits():
     assert cache.misses == 2
 
     assert str(cache) == "<FIFOCache maxsize=4 hits=3 misses=2>"
+
+
+def test_discard():
+    cache = LRUCache(maxsize=3)
+    cache.set("key1", "value1")
+    cache.set("key2", "value2")
+    cache.set("key3", "value3")
+
+    assert len(cache) == 3
+    assert cache.get("key1") == "value1"
+
+    cache.discard("key1")
+
+    assert len(cache) == 2
+    assert cache.get("key1") is None
+
+    cache.discard("key4")  # key that does not exist
+
+    assert len(cache) == 2  # size should not change

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import TYPE_CHECKING, Iterable
 
 import rich.repr
 
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Iterable, TYPE_CHECKING
-
+from ._help_renderables import HelpText
 from .styles import Styles
 from .tokenize import Token
 from .types import Specificity3
@@ -71,7 +71,7 @@ class Selector:
         """Adds a pseudo class and updates specificity.
 
         Args:
-            pseudo_class (str): Name of pseudo class.
+            pseudo_class: Name of pseudo class.
         """
         self.pseudo_classes.append(pseudo_class)
         specificity1, specificity2, specificity3 = self.specificity
@@ -81,10 +81,10 @@ class Selector:
         """Check if a given node matches the selector.
 
         Args:
-            node (DOMNode): A DOM node.
+            node: A DOM node.
 
         Returns:
-            bool: True if the selector matches, otherwise False.
+            True if the selector matches, otherwise False.
         """
         return self._checks[self.type](node)
 
@@ -156,7 +156,7 @@ class SelectorSet:
 class RuleSet:
     selector_set: list[SelectorSet] = field(default_factory=list)
     styles: Styles = field(default_factory=Styles)
-    errors: list[tuple[Token, str]] = field(default_factory=list)
+    errors: list[tuple[Token, str | HelpText]] = field(default_factory=list)
 
     is_default_rules: bool = False
     tie_breaker: int = 0
@@ -188,7 +188,7 @@ class RuleSet:
         """Generate the CSS this RuleSet
 
         Returns:
-            str: A string containing CSS code.
+            A string containing CSS code.
         """
         declarations = "\n".join(f"    {line}" for line in self.styles.css_lines)
         css = f"{self.selectors} {{\n{declarations}\n}}"

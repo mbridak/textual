@@ -33,8 +33,7 @@ class GridLayout(Layout):
             """Iterate over table coordinates ad infinitum.
 
             Args:
-                column_count (int): Number of columns
-
+                column_count: Number of columns
             """
             row = 0
             while True:
@@ -48,13 +47,13 @@ class GridLayout(Layout):
             """Get coords occupied by a cell.
 
             Args:
-                column_start (int): Start column.
-                row_start (int): Start_row.
-                columns (int): Number of columns.
-                rows (int): Number of rows.
+                column_start: Start column.
+                row_start: Start_row.
+                columns: Number of columns.
+                rows: Number of rows.
 
             Returns:
-                set[tuple[int, int]]: Set of coords.
+                Set of coords.
             """
             return {
                 (column, row)
@@ -67,11 +66,11 @@ class GridLayout(Layout):
             a list of `count` values.
 
             Args:
-                scalars (Iterable[T]): Iterable of values.
-                count (int): Number of values to return.
+                scalars: Iterable of values.
+                count: Number of values to return.
 
             Returns:
-                list[T]: A list of values.
+                A list of values.
             """
             limited_values = list(scalars)[:]
             while len(limited_values) < count:
@@ -130,7 +129,6 @@ class GridLayout(Layout):
 
         placements: list[WidgetPlacement] = []
         add_placement = placements.append
-        fraction_unit = Fraction(1)
         widgets: list[Widget] = []
         add_widget = widgets.append
         max_column = len(columns) - 1
@@ -145,7 +143,10 @@ class GridLayout(Layout):
             y2, cell_height = rows[min(max_row, row + row_span)]
             cell_size = Size(cell_width + x2 - x, cell_height + y2 - y)
             width, height, margin = widget._get_box_model(
-                cell_size, viewport, fraction_unit, fraction_unit
+                cell_size,
+                viewport,
+                Fraction(cell_size.width),
+                Fraction(cell_size.height),
             )
             region = (
                 Region(x, y, int(width + margin.width), int(height + margin.height))
@@ -155,4 +156,4 @@ class GridLayout(Layout):
             add_placement(WidgetPlacement(region, margin, widget))
             add_widget(widget)
 
-        return (placements, set(widgets))
+        return placements

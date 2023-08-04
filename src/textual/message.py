@@ -1,57 +1,63 @@
+"""
+
+The base class for all messages (including events).
+"""
+
 from __future__ import annotations
 
-from typing import ClassVar, TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import rich.repr
 
-from . import _clock
+from . import _time
+from ._context import active_message_pump
+from ._types import MessageTarget
 from .case import camel_to_snake
-from ._types import MessageTarget as MessageTarget
 
 if TYPE_CHECKING:
-    from .widget import Widget
     from .message_pump import MessagePump
+    from .widget import Widget
 
 
 @rich.repr.auto
 class Message:
-    """Base class for a message.
-
-    Args:
-        sender (MessageTarget): The sender of the message / event.
-
-    """
+    """Base class for a message."""
 
     __slots__ = [
-        "sender",
+        "_sender",
         "time",
         "_forwarded",
         "_no_default_action",
         "_stop_propagation",
-        "_handler_name",
+        "_prevent",
     ]
 
-    sender: MessageTarget
+    ALLOW_SELECTOR_MATCH: ClassVar[set[str]] = set()
+    """Additional attributes that can be used with the [`on` decorator][textual.on].
+
+    These attributes must be widgets.
+    """
     bubble: ClassVar[bool] = True  # Message will bubble to parent
     verbose: ClassVar[bool] = False  # Message is verbose
     no_dispatch: ClassVar[bool] = False  # Message may not be handled by client code
     namespace: ClassVar[str] = ""  # Namespace to disambiguate messages
+    handler_name: ClassVar[str]
+    """Name of the default message handler."""
 
-    def __init__(self, sender: MessageTarget) -> None:
-        self.sender = sender
+    def __init__(self) -> None:
+        self.__post_init__()
 
-        self.time = _clock.get_time_no_wait()
+    def __post_init__(self) -> None:
+        """Allow dataclasses to initialize the object."""
+        self._sender: MessagePump | None = active_message_pump.get(None)
+        self.time: float = _time.get_time()
         self._forwarded = False
         self._no_default_action = False
         self._stop_propagation = False
-        name = camel_to_snake(self.__class__.__name__)
-        self._handler_name = (
-            f"on_{self.namespace}_{name}" if self.namespace else f"on_{name}"
-        )
-        super().__init__()
+        self._prevent: set[type[Message]] = set()
 
     def __rich_repr__(self) -> rich.repr.Result:
-        yield self.sender
+        yield from ()
 
     def __init_subclass__(
         cls,
@@ -68,29 +74,35 @@ class Message:
             cls.no_dispatch = no_dispatch
         if namespace is not None:
             cls.namespace = namespace
+        name = camel_to_snake(cls.__name__)
+        cls.handler_name = f"on_{namespace}_{name}" if namespace else f"on_{name}"
+
+    @property
+    def control(self) -> Widget | None:
+        """The widget associated with this message, or None by default."""
+        return None
 
     @property
     def is_forwarded(self) -> bool:
+        """Has the message been forwarded?"""
         return self._forwarded
-
-    @property
-    def handler_name(self) -> str:
-        """The name of the handler associated with this message."""
-        # Property to make it read only
-        return self._handler_name
 
     def _set_forwarded(self) -> None:
         """Mark this event as being forwarded."""
         self._forwarded = True
 
+    def _set_sender(self, sender: MessagePump) -> None:
+        """Set the sender."""
+        self._sender = sender
+
     def can_replace(self, message: "Message") -> bool:
         """Check if another message may supersede this one.
 
         Args:
-            message (Message): Another message.
+            message: Another message.
 
         Returns:
-            bool: True if this message may replace the given message
+            True if this message may replace the given message
         """
         return False
 
@@ -99,8 +111,8 @@ class Message:
         from being called.
 
         Args:
-            prevent (bool, optional): True if the default action should be suppressed,
-                or False if the default actions should be performed. Defaults to True.
+            prevent: True if the default action should be suppressed,
+                or False if the default actions should be performed.
         """
         self._no_default_action = prevent
         return self
@@ -109,15 +121,15 @@ class Message:
         """Stop propagation of the message to parent.
 
         Args:
-            stop (bool, optional): The stop flag. Defaults to True.
+            stop: The stop flag.
         """
         self._stop_propagation = stop
         return self
 
-    async def _bubble_to(self, widget: MessagePump) -> None:
+    def _bubble_to(self, widget: MessagePump) -> None:
         """Bubble to a widget (typically the parent).
 
         Args:
-            widget (Widget): Target of bubble.
+            widget: Target of bubble.
         """
-        await widget.post_message(self)
+        widget.post_message(self)

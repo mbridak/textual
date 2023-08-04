@@ -1,16 +1,53 @@
+"""
+A Strip contains the result of rendering a widget.
+See [line API](/guide/widgets#line-api) for how to use Strips.
+"""
+
+
 from __future__ import annotations
 
 from itertools import chain
-from typing import Iterable, Iterator
+from typing import Iterable, Iterator, Sequence
 
 import rich.repr
 from rich.cells import cell_len, set_cell_size
+from rich.console import Console, ConsoleOptions, RenderResult
 from rich.segment import Segment
-from rich.style import Style
+from rich.style import Style, StyleType
 
 from ._cache import FIFOCache
-from ._filter import LineFilter
 from ._segment_tools import index_to_cell_position
+from .color import Color
+from .constants import DEBUG
+from .filter import LineFilter
+
+
+def get_line_length(segments: Iterable[Segment]) -> int:
+    """Get the line length (total length of all segments).
+
+    Args:
+        segments: Iterable of segments.
+
+    Returns:
+        Length of line in cells.
+    """
+    _cell_len = cell_len
+    return sum([_cell_len(text) for text, _, control in segments if not control])
+
+
+class StripRenderable:
+    """A renderable which renders a list of strips in to lines."""
+
+    def __init__(self, strips: list[Strip]) -> None:
+        self._strips = strips
+
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
+        new_line = Segment.line()
+        for strip in self._strips:
+            yield from strip
+            yield new_line
 
 
 @rich.repr.auto
@@ -20,8 +57,8 @@ class Strip:
     A Strip is like an immutable list of Segments. The immutability allows for effective caching.
 
     Args:
-        segments (Iterable[Segment]): An iterable of segments.
-        cell_length (int | None, optional): The cell length if known, or None to calculate on demand. Defaults to None.
+        segments: An iterable of segments.
+        cell_length: The cell length if known, or None to calculate on demand.
     """
 
     __slots__ = [
@@ -29,6 +66,12 @@ class Strip:
         "_cell_length",
         "_divide_cache",
         "_crop_cache",
+        "_style_cache",
+        "_filter_cache",
+        "_render_cache",
+        "_line_length_cache",
+        "_crop_extend_cache",
+        "_link_ids",
     ]
 
     def __init__(
@@ -37,35 +80,68 @@ class Strip:
         self._segments = list(segments)
         self._cell_length = cell_length
         self._divide_cache: FIFOCache[tuple[int, ...], list[Strip]] = FIFOCache(4)
-        self._crop_cache: FIFOCache[tuple[int, int], Strip] = FIFOCache(4)
+        self._crop_cache: FIFOCache[tuple[int, int], Strip] = FIFOCache(16)
+        self._style_cache: FIFOCache[Style, Strip] = FIFOCache(16)
+        self._filter_cache: FIFOCache[tuple[LineFilter, Color], Strip] = FIFOCache(4)
+        self._line_length_cache: FIFOCache[
+            tuple[int, Style | None],
+            Strip,
+        ] = FIFOCache(4)
+        self._crop_extend_cache: FIFOCache[
+            tuple[int, int, Style | None],
+            Strip,
+        ] = FIFOCache(4)
+        self._render_cache: str | None = None
+        self._link_ids: set[str] | None = None
+
+        if DEBUG and cell_length is not None:
+            # If `cell_length` is incorrect, render will be fubar
+            assert get_line_length(self._segments) == cell_length
 
     def __rich_repr__(self) -> rich.repr.Result:
         yield self._segments
         yield self.cell_length
 
+    @property
+    def text(self) -> str:
+        """Segment text."""
+        return "".join(segment.text for segment in self._segments)
+
+    @property
+    def link_ids(self) -> set[str]:
+        """A set of the link ids in this Strip."""
+        if self._link_ids is None:
+            self._link_ids = {
+                style._link_id for _, style, _ in self._segments if style is not None
+            }
+        return self._link_ids
+
     @classmethod
-    def blank(cls, cell_length: int, style: Style | None) -> Strip:
+    def blank(cls, cell_length: int, style: StyleType | None = None) -> Strip:
         """Create a blank strip.
 
         Args:
-            cell_length (int): Desired cell length.
-            style (Style | None): Style of blank.
+            cell_length: Desired cell length.
+            style: Style of blank.
 
         Returns:
-            Strip: New strip.
+            New strip.
         """
-        return cls([Segment(" " * cell_length, style)], cell_length)
+        segment_style = Style.parse(style) if isinstance(style, str) else style
+        return cls([Segment(" " * cell_length, segment_style)], cell_length)
 
     @classmethod
-    def from_lines(cls, lines: list[list[Segment]], cell_length: int) -> list[Strip]:
+    def from_lines(
+        cls, lines: list[list[Segment]], cell_length: int | None = None
+    ) -> list[Strip]:
         """Convert lines (lists of segments) to a list of Strips.
 
         Args:
-            lines (list[list[Segment]]): List of lines, where a line is a list of segments.
-            cell_length (int): Cell length of lines (must be same).
+            lines: List of lines, where a line is a list of segments.
+            cell_length: Cell length of lines (must be same) or None if not known.
 
         Returns:
-            list[Strip]: List of strips.
+            List of strips.
         """
         return [cls(segments, cell_length) for segments in lines]
 
@@ -75,10 +151,10 @@ class Strip:
         at `index`.
 
         Args:
-            index (int): The index to convert.
+            index: The index to convert.
 
         Returns:
-            int: The cell position of the character at `index`.
+            The cell position of the character at `index`.
         """
         return index_to_cell_position(self._segments, index)
 
@@ -87,7 +163,7 @@ class Strip:
         """Get the number of cells required to render this object."""
         # Done on demand and cached, as this is an O(n) operation
         if self._cell_length is None:
-            self._cell_length = Segment.get_line_length(self._segments)
+            self._cell_length = get_line_length(self._segments)
         return self._cell_length
 
     @classmethod
@@ -95,10 +171,10 @@ class Strip:
         """Join a number of strips in to one.
 
         Args:
-            strips (Iterable[Strip]): An iterable of Strips.
+            strips: An iterable of Strips.
 
         Returns:
-            Strip: A new combined strip.
+            A new combined strip.
         """
 
         segments: list[list[Segment]] = []
@@ -128,16 +204,38 @@ class Strip:
             self._segments == strip._segments and self.cell_length == strip.cell_length
         )
 
+    def extend_cell_length(self, cell_length: int, style: Style | None = None) -> Strip:
+        """Extend the cell length if it is less than the given value.
+
+        Args:
+            cell_length: Required minimum cell length.
+            style: Style for padding if the cell length is extended.
+
+        Returns:
+            A new Strip.
+        """
+        if self.cell_length < cell_length:
+            missing_space = cell_length - self.cell_length
+            segments = self._segments + [Segment(" " * missing_space, style)]
+            return Strip(segments, cell_length)
+        else:
+            return self
+
     def adjust_cell_length(self, cell_length: int, style: Style | None = None) -> Strip:
         """Adjust the cell length, possibly truncating or extending.
 
         Args:
-            cell_length (int): New desired cell length.
-            style (Style | None): Style when extending, or `None`. Defaults to `None`.
+            cell_length: New desired cell length.
+            style: Style when extending, or `None`.
 
         Returns:
-            Strip: A new strip with the supplied cell length.
+            A new strip with the supplied cell length.
         """
+
+        cache_key = (cell_length, style)
+        cached_strip = self._line_length_cache.get(cache_key)
+        if cached_strip is not None:
+            return cached_strip
 
         new_line: list[Segment]
         line = self._segments
@@ -150,6 +248,7 @@ class Strip:
             new_line = line + [
                 _Segment(" " * (cell_length - current_cell_length), style)
             ]
+            strip = Strip(new_line, cell_length)
 
         elif current_cell_length > cell_length:
             # Cell length is shorter so we need to truncate.
@@ -166,17 +265,20 @@ class Strip:
                     text = set_cell_size(text, cell_length - line_length)
                     append(_Segment(text, segment_style))
                     break
+            strip = Strip(new_line, cell_length)
         else:
             # Strip is already the required cell length, so return self.
-            return self
+            strip = self
 
-        return Strip(new_line, cell_length)
+        self._line_length_cache[cache_key] = strip
+
+        return strip
 
     def simplify(self) -> Strip:
         """Simplify the segments (join segments with same style)
 
         Returns:
-            Strip: New strip.
+            New strip.
         """
         line = Strip(
             Segment.simplify(self._segments),
@@ -184,56 +286,82 @@ class Strip:
         )
         return line
 
-    def apply_filter(self, filter: LineFilter) -> Strip:
+    def apply_filter(self, filter: LineFilter, background: Color) -> Strip:
         """Apply a filter to all segments in the strip.
 
         Args:
-            filter (LineFilter): A line filter object.
+            filter: A line filter object.
 
         Returns:
-            Strip: A new Strip.
+            A new Strip.
         """
-        return Strip(filter.apply(self._segments), self._cell_length)
+        cached_strip = self._filter_cache.get((filter, background))
+        if cached_strip is None:
+            cached_strip = Strip(
+                filter.apply(self._segments, background), self._cell_length
+            )
+            self._filter_cache[(filter, background)] = cached_strip
+        return cached_strip
 
     def style_links(self, link_id: str, link_style: Style) -> Strip:
         """Apply a style to Segments with the given link_id.
 
         Args:
-            link_id (str): A link id.
-            link_style (Style): Style to apply.
+            link_id: A link id.
+            link_style: Style to apply.
 
         Returns:
-            Strip: New strip (or same Strip if no changes).
+            New strip (or same Strip if no changes).
         """
+
         _Segment = Segment
-        if not any(
-            segment.style._link_id == link_id
-            for segment in self._segments
-            if segment.style
-        ):
+        if link_id not in self.link_ids:
             return self
         segments = [
             _Segment(
                 text,
-                (style + link_style if style is not None else None)
-                if (style and not style._null and style._link_id == link_id)
-                else style,
+                (
+                    (style + link_style if style is not None else None)
+                    if (style and not style._null and style._link_id == link_id)
+                    else style
+                ),
                 control,
             )
             for text, style, control in self._segments
         ]
         return Strip(segments, self._cell_length)
 
-    def crop(self, start: int, end: int) -> Strip:
+    def crop_extend(self, start: int, end: int, style: Style | None) -> Strip:
+        """Crop between two points, extending the length if required.
+
+        Args:
+            start: Start offset of crop.
+            end: End offset of crop.
+            style: Style of additional padding.
+
+        Returns:
+            New cropped Strip.
+        """
+        cache_key = (start, end, style)
+        cached_result = self._crop_extend_cache.get(cache_key)
+        if cached_result is not None:
+            return cached_result
+        strip = self.extend_cell_length(end).crop(start, end)
+        self._crop_extend_cache[cache_key] = strip
+        return strip
+
+    def crop(self, start: int, end: int | None = None) -> Strip:
         """Crop a strip between two cell positions.
 
         Args:
-            start (int): The start cell position (inclusive).
-            end (int): The end cell position (exclusive).
+            start: The start cell position (inclusive).
+            end: The end cell position (exclusive).
 
         Returns:
-            Strip: A new Strip.
+            A new Strip.
         """
+        start = max(0, start)
+        end = self.cell_length if end is None else min(self.cell_length, end)
         if start == 0 and end == self.cell_length:
             return self
         cache_key = (start, end)
@@ -277,27 +405,72 @@ class Strip:
         self._crop_cache[cache_key] = strip
         return strip
 
-    def divide(self, cuts: Iterable[int]) -> list[Strip]:
+    def divide(self, cuts: Iterable[int]) -> Sequence[Strip]:
         """Divide the strip in to multiple smaller strips by cutting at given (cell) indices.
 
         Args:
-            cuts (Iterable[int]): An iterable of cell positions as ints.
+            cuts: An iterable of cell positions as ints.
 
         Returns:
-            list[Strip]: A new list of strips.
+            A new list of strips.
         """
 
         pos = 0
+        cell_length = self.cell_length
+        cuts = [cut for cut in cuts if cut <= cell_length]
         cache_key = tuple(cuts)
         cached = self._divide_cache.get(cache_key)
         if cached is not None:
             return cached
 
-        strips: list[Strip] = []
-        add_strip = strips.append
-        for segments, cut in zip(Segment.divide(self._segments, cuts), cuts):
-            add_strip(Strip(segments, cut - pos))
-            pos += cut
+        strips: list[Strip]
+        if cuts == [cell_length]:
+            strips = [self]
+        else:
+            strips = []
+            add_strip = strips.append
+            for segments, cut in zip(Segment.divide(self._segments, cuts), cuts):
+                add_strip(Strip(segments, cut - pos))
+                pos = cut
 
         self._divide_cache[cache_key] = strips
         return strips
+
+    def apply_style(self, style: Style) -> Strip:
+        """Apply a style to the Strip.
+
+        Args:
+            style: A Rich style.
+
+        Returns:
+            A new strip.
+        """
+        cached = self._style_cache.get(style)
+        if cached is not None:
+            return cached
+        styled_strip = Strip(
+            Segment.apply_style(self._segments, style), self.cell_length
+        )
+        self._style_cache[style] = styled_strip
+        return styled_strip
+
+    def render(self, console: Console) -> str:
+        """Render the strip into terminal sequences.
+
+        Args:
+            console: Console instance.
+
+        Returns:
+            Rendered sequences.
+        """
+        if self._render_cache is None:
+            color_system = console._color_system
+            render = Style.render
+            self._render_cache = "".join(
+                [
+                    render(style, text, color_system=color_system)
+                    for text, style, _ in self._segments
+                    if style is not None
+                ]
+            )
+        return self._render_cache

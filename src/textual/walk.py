@@ -1,7 +1,15 @@
+"""
+Functions for *walking* the DOM.
+
+!!! note
+
+    For most purposes you would be better off using [query][textual.dom.DOMNode.query], which uses these functions internally.
+"""
+
 from __future__ import annotations
 
 from collections import deque
-from typing import Iterable, Iterator, TypeVar, overload, TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterable, Iterator, TypeVar, overload
 
 if TYPE_CHECKING:
     from textual.dom import DOMNode
@@ -42,14 +50,12 @@ def walk_depth_first(
         Consider [walk_children][textual.dom.DOMNode.walk_children] which doesn't have this limitation.
 
     Args:
-        root (DOMNode): The root note (starting point).
-        filter_type (type[WalkType] | None, optional): Optional DOMNode subclass to filter by, or ``None`` for no filter.
-            Defaults to None.
-        with_root (bool, optional): Include the root in the walk. Defaults to True.
+        root: The root note (starting point).
+        filter_type: Optional DOMNode subclass to filter by, or ``None`` for no filter.
+        with_root: Include the root in the walk.
 
     Returns:
-        Iterable[DOMNode] | Iterable[WalkType]: An iterable of DOMNodes, or the type specified in ``filter_type``.
-
+        An iterable of DOMNodes, or the type specified in ``filter_type``.
     """
     from textual.dom import DOMNode
 
@@ -104,14 +110,12 @@ def walk_breadth_first(
         Consider [walk_children][textual.dom.DOMNode.walk_children] which doesn't have this limitation.
 
     Args:
-        root (DOMNode): The root note (starting point).
-        filter_type (type[WalkType] | None, optional): Optional DOMNode subclass to filter by, or ``None`` for no filter.
-            Defaults to None.
-        with_root (bool, optional): Include the root in the walk. Defaults to True.
+        root: The root note (starting point).
+        filter_type: Optional DOMNode subclass to filter by, or ``None`` for no filter.
+        with_root: Include the root in the walk.
 
     Returns:
-        Iterable[DOMNode] | Iterable[WalkType]: An iterable of DOMNodes, or the type specified in ``filter_type``.
-
+        An iterable of DOMNodes, or the type specified in ``filter_type``.
     """
     from textual.dom import DOMNode
 

@@ -1,13 +1,13 @@
 # Scrollbar-background
 
-The `scrollbar-background` sets the background color of the scrollbar.
+The `scrollbar-background` style sets the background color of the scrollbar.
 ## Syntax
 
 --8<-- "docs/snippets/syntax_block_start.md"
 <a href="./scrollbar_background">scrollbar-background</a>: <a href="../../css_types/color">&lt;color&gt;</a> [<a href="../../css_types/percentage">&lt;percentage&gt;</a>];
 --8<-- "docs/snippets/syntax_block_end.md"
 
-`scrollbar-background` accepts a [`<color>`](../../../css_types/color) (with an optional transparency level defined by a [`<percentage>`](../../../css_types/percentage)) that is used to define the background color of a scrollbar.
+`scrollbar-background` accepts a [`<color>`](../../../css_types/color) (with an optional opacity level defined by a [`<percentage>`](../../../css_types/percentage)) that is used to define the background color of a scrollbar.
 
 ## Example
 

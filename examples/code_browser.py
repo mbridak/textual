@@ -4,7 +4,6 @@ Code browser example.
 Run with:
 
     python code_browser.py PATH
-
 """
 
 import sys
@@ -14,7 +13,7 @@ from rich.traceback import Traceback
 
 from textual import events
 from textual.app import App, ComposeResult
-from textual.containers import Container, Vertical
+from textual.containers import Container, VerticalScroll
 from textual.reactive import var
 from textual.widgets import DirectoryTree, Footer, Header, Static
 
@@ -38,10 +37,10 @@ class CodeBrowser(App):
         """Compose our UI."""
         path = "./" if len(sys.argv) < 2 else sys.argv[1]
         yield Header()
-        yield Container(
-            DirectoryTree(path, id="tree-view"),
-            Vertical(Static(id="code", expand=True), id="code-view"),
-        )
+        with Container():
+            yield DirectoryTree(path, id="tree-view")
+            with VerticalScroll(id="code-view"):
+                yield Static(id="code", expand=True)
         yield Footer()
 
     def on_mount(self, event: events.Mount) -> None:
@@ -55,7 +54,7 @@ class CodeBrowser(App):
         code_view = self.query_one("#code", Static)
         try:
             syntax = Syntax.from_path(
-                event.path,
+                str(event.path),
                 line_numbers=True,
                 word_wrap=False,
                 indent_guides=True,
@@ -67,7 +66,7 @@ class CodeBrowser(App):
         else:
             code_view.update(syntax)
             self.query_one("#code-view").scroll_home(animate=False)
-            self.sub_title = event.path
+            self.sub_title = str(event.path)
 
     def action_toggle_files(self) -> None:
         """Called in response to key binding."""

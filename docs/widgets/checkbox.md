@@ -1,5 +1,7 @@
 # Checkbox
 
+!!! tip "Added in version 0.13.0"
+
 A simple checkbox widget which stores a boolean value.
 
 - [x] Focusable
@@ -7,7 +9,7 @@ A simple checkbox widget which stores a boolean value.
 
 ## Example
 
-The example below shows checkboxes in various states.
+The example below shows check boxes in various states.
 
 === "Output"
 
@@ -28,30 +30,36 @@ The example below shows checkboxes in various states.
 
 ## Reactive Attributes
 
-| Name    | Type   | Default | Description                        |
-| ------- | ------ | ------- | ---------------------------------- |
-| `value` | `bool` | `False` | The default value of the checkbox. |
+| Name    | Type   | Default | Description                |
+| ------- | ------ | ------- | -------------------------- |
+| `value` | `bool` | `False` | The value of the checkbox. |
+
+## Bindings
+
+The checkbox widget defines the following bindings:
+
+::: textual.widgets._toggle_button.ToggleButton.BINDINGS
+    options:
+      show_root_heading: false
+      show_root_toc_entry: false
+
+## Component Classes
+
+The checkbox widget provides the following component classes:
+
+::: textual.widgets._toggle_button.ToggleButton.COMPONENT_CLASSES
+    options:
+      show_root_heading: false
+      show_root_toc_entry: false
 
 ## Messages
 
-### Pressed
+- [Checkbox.Changed][textual.widgets.Checkbox.Changed]
 
-The `Checkbox.Changed` message is sent when the checkbox is toggled.
 
-- [x] Bubbles
+---
 
-#### Attributes
 
-| attribute | type   | purpose                        |
-| --------- | ------ | ------------------------------ |
-| `value`   | `bool` | The new value of the checkbox. |
-
-## Additional Notes
-
-- To remove the spacing around a checkbox, set `border: none;` and `padding: 0;`.
-- The `.checkbox--switch` component class can be used to change the color and background of the switch.
-- When focused, the ++enter++ or ++space++ keys can be used to toggle the checkbox.
-
-## See Also
-
-- [Checkbox](../api/checkbox.md) code reference
+::: textual.widgets.Checkbox
+    options:
+      heading_level: 2

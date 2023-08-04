@@ -1,19 +1,31 @@
-"""Provides the type of an awaitable remove."""
+"""
 
-from asyncio import Event
+An *optionally* awaitable object returned by methods that remove widgets.
+"""
+
+from asyncio import Event, Task
 from typing import Generator
 
 
 class AwaitRemove:
-    """An awaitable returned by App.remove and DOMQuery.remove."""
+    """An awaitable returned by a method that removes DOM nodes.
 
-    def __init__(self, finished_flag: Event) -> None:
+    Returned by [Widget.remove][textual.widget.Widget.remove] and
+    [DOMQuery.remove][textual.css.query.DOMQuery.remove].
+    """
+
+    def __init__(self, finished_flag: Event, task: Task) -> None:
         """Initialise the instance of ``AwaitRemove``.
 
         Args:
-            finished_flag (asyncio.Event): The asyncio event to wait on.
+            finished_flag: The asyncio event to wait on.
+            task: The task which does the remove (required to keep a reference).
         """
         self.finished_flag = finished_flag
+        self._task = task
+
+    async def __call__(self) -> None:
+        await self
 
     def __await__(self) -> Generator[None, None, None]:
         async def await_prune() -> None:

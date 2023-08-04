@@ -107,15 +107,36 @@ The message class is defined within the widget class itself. This is not strictl
 - It reduces the amount of imports. If you import `ColorButton`, you have access to the message class via `ColorButton.Selected`.
 - It creates a namespace for the handler. So rather than `on_selected`, the handler name becomes `on_color_button_selected`. This makes it less likely that your chosen name will clash with another message.
 
+### Sending messages
 
-## Sending events
+To send a message call the [post_message()][textual.message_pump.MessagePump.post_message] method. This will place a message on the widget's message queue and run any message handlers.
 
-In the previous example we used [emit()][textual.message_pump.MessagePump.emit] to send an event to its parent. We could also have used [emit_no_wait()][textual.message_pump.MessagePump.emit_no_wait] for non async code. Sending messages in this way allows you to write custom widgets without needing to know in what context they will be used.
+It is common for widgets to send messages to themselves, and allow them to bubble. This is so a base class has an opportunity to handle the message. We do this in the example above, which means a subclass could add a `on_color_button_selected` if it wanted to handle the message itself.
 
-There are other ways of sending (posting) messages, which you may need to use less frequently.
+## Preventing messages
 
-- [post_message][textual.message_pump.MessagePump.post_message] To post a message to a particular widget.
-- [post_message_no_wait][textual.message_pump.MessagePump.post_message_no_wait] The non-async version of `post_message`.
+You can *temporarily* disable posting of messages of a particular type by calling [prevent][textual.message_pump.MessagePump.prevent], which returns a context manager (used with Python's `with` keyword). This is typically used when updating data in a child widget and you don't want to receive notifications that something has changed.
+
+The following example will play the terminal bell as you type. It does this by handling [Input.Changed][textual.widgets.Input.Changed] and calling [bell()][textual.app.App.bell]. There is a Clear button which sets the input's value to an empty string. This would normally also result in a `Input.Changed` event being sent (and the bell playing). Since we don't want the button to make a sound, the assignment to `value` is wrapped within a [prevent][textual.message_pump.MessagePump.prevent] context manager.
+
+!!! tip
+
+    In reality, playing the terminal bell as you type would be very irritating -- we don't recommend it!
+
+=== "prevent.py"
+
+    ```python title="prevent.py"
+    --8<-- "docs/examples/events/prevent.py"
+    ```
+
+    1. Clear the input without sending an Input.Changed event.
+    2. Plays the terminal sound when typing.
+
+=== "Output"
+
+    ```{.textual path="docs/examples/events/prevent.py"}
+    ```
+
 
 
 ## Message handlers
@@ -127,19 +148,134 @@ Most of the logic in a Textual app will be written in message handlers. Let's ex
 Textual uses the following scheme to map messages classes on to a Python method.
 
 - Start with `"on_"`.
-- Add the messages' namespace (if any) converted from CamelCase to snake_case plus an underscore `"_"`
+- Add the message's namespace (if any) converted from CamelCase to snake_case plus an underscore `"_"`.
 - Add the name of the class converted from CamelCase to snake_case.
 
 <div class="excalidraw">
 --8<-- "docs/images/events/naming.excalidraw.svg"
 </div>
 
+Messages have a namespace if they are defined as a child class of a Widget.
+The namespace is the name of the parent class.
+For instance, the builtin `Input` class defines it's `Changed` message as follow:
+
+```python
+class Input(Widget):
+    ...
+    class Changed(Message):
+        """Posted when the value changes."""
+        ...
+```
+
+Because `Changed` is a *child* class of `Input`, its namespace will be "input" (and the handler name will be `on_input_changed`).
+This allows you to have similarly named events, without clashing event handler names.
+
+!!! tip
+
+    If you are ever in doubt about what the handler name should be for a given event, print the `handler_name` class variable for your event class.
+
+    Here's how you would check the handler name for the `Input.Changed` event:
+
+    ```py
+    >>> from textual.widgets import Input
+    >>> Input.Changed.handler_name
+    'on_input_changed'
+    ```
+
+### On decorator
+
+In addition to the naming convention, message handlers may be created with the [`on`][textual.on] decorator, which turns a method into a handler for the given message or event.
+
+For instance, the two methods declared below are equivalent:
+
+```python
+@on(Button.Pressed)
+def handle_button_pressed(self):
+    ...
+
+def on_button_pressed(self):
+    ...
+```
+
+While this allows you to name your method handlers anything you want, the main advantage of the decorator approach over the naming convention is that you can specify *which* widget(s) you want to handle messages for.
+
+Let's first explore where this can be useful.
+In the following example we have three buttons, each of which does something different; one plays the bell, one toggles dark mode, and the other quits the app.
+
+=== "on_decorator01.py"
+
+    ```python title="on_decorator01.py"
+    --8<-- "docs/examples/events/on_decorator01.py"
+    ```
+
+    1. The message handler is called when any button is pressed
+
+=== "Output"
+
+    ```{.textual path="docs/examples/events/on_decorator01.py"}
+    ```
+
+Note how the message handler has a chained `if` statement to match the action to the button.
+While this works just fine, it can be a little hard to follow when the number of buttons grows.
+
+The `on` decorator takes a [CSS selector](./CSS.md#selectors) in addition to the event type which will be used to select which controls the handler should work with.
+We can use this to write a handler per control rather than manage them all in a single handler.
+
+The following example uses the decorator approach to write individual message handlers for each of the three buttons:
+
+=== "on_decorator02.py"
+
+    ```python title="on_decorator02.py"
+    --8<-- "docs/examples/events/on_decorator02.py"
+    ```
+
+    1. Matches the button with an id of "bell" (note the `#` to match the id)
+    2. Matches the button with class names "toggle" *and* "dark"
+    3. Matches the button with an id of "quit"
+
+=== "Output"
+
+    ```{.textual path="docs/examples/events/on_decorator02.py"}
+    ```
+
+While there are a few more lines of code, it is clearer what will happen when you click any given button.
+
+Note that the decorator requires that the message class has a `control` attribute which should be the widget associated with the message.
+Messages from builtin controls will have this attribute, but you may need to add `control` to any [custom messages](#custom-messages) you write.
+
+!!! note
+
+    If multiple decorated handlers match the message, then they will *all* be called in the order they are defined.
+
+    The naming convention handler will be called *after* any decorated handlers.
+
+#### Applying CSS selectors to arbitrary attributes
+
+The `on` decorator also accepts selectors as keyword arguments that may be used to match other attributes in a Message, provided those attributes are in [`Message.ALLOW_SELECTOR_MATCH`][textual.message.Message.ALLOW_SELECTOR_MATCH].
+
+The snippet below shows how to match the message [`TabbedContent.TabActivated`][textual.widgets.TabbedContent.TabActivated] only when the tab with id `home` was activated:
+
+```py
+@on(TabbedContent.TabActivated, tab="#home")
+def home_tab(self) -> None:
+    self.log("Switched back to home tab.")
+    ...
+```
+
 ### Handler arguments
 
-Message handler methods can be written with or without a positional argument. If you add a positional argument, Textual will call the handler with the event object. The following handler (taken from custom01.py above) contains a `message` parameter. The body of the code makes use of the message to set a preset color.
+Message handler methods can be written with or without a positional argument. If you add a positional argument, Textual will call the handler with the event object. The following handler (taken from `custom01.py` above) contains a `message` parameter. The body of the code makes use of the message to set a preset color.
 
 ```python
     def on_color_button_selected(self, message: ColorButton.Selected) -> None:
+        self.screen.styles.animate("background", message.color, duration=0.5)
+```
+
+A similar handler can be written using the decorator `on`:
+
+```python
+    @on(ColorButton.Selected)
+    def animate_background_color(self, message: ColorButton.Selected) -> None:
         self.screen.styles.animate("background", message.color, duration=0.5)
 ```
 
@@ -183,7 +319,7 @@ Let's look at an example which looks up word definitions from an [api](https://d
 
 === "Output"
 
-    ```{.textual path="docs/examples/events/dictionary.py" press="t,e,x,t,_,_,_,_,_,_,_,_,_,_,_"}
+    ```{.textual path="docs/examples/events/dictionary.py"}
     ```
 
 Note the highlighted line in the above code which calls `asyncio.create_task` to run a coroutine in the background. Without this you would find typing in to the text box to be unresponsive.

@@ -1,9 +1,11 @@
-from ..app import ComposeResult
-from ._static import Static
-from ._button import Button
-from ..containers import Container
+"""Provides a Textual welcome widget."""
 
 from rich.markdown import Markdown
+
+from ..app import ComposeResult
+from ..containers import Container
+from ._button import Button
+from ._static import Static
 
 WELCOME_MD = """\
 # Welcome!
@@ -19,16 +21,21 @@ I will face my fear.
 I will permit it to pass over me and through me.
 And when it has gone past, I will turn the inner eye to see its path.
 Where the fear has gone there will be nothing. Only I will remain."
-
 """
 
 
 class Welcome(Static):
+    """A Textual welcome widget.
+
+    This widget can be used as a form of placeholder within a Textual
+    application; although also see
+    [Placeholder][textual.widgets._placeholder.Placeholder].
+    """
 
     DEFAULT_CSS = """
         Welcome {
             width: 100%;
-            height: 100%;         
+            height: 100%;
             background: $surface;
         }
 
@@ -44,7 +51,7 @@ class Welcome(Static):
 
         Welcome #close {
             dock: bottom;
-            width: 100%;        
+            width: 100%;
         }
     """
 

@@ -4,15 +4,17 @@ import re
 from pathlib import PurePath
 from typing import NamedTuple
 
+import rich.repr
 from rich.console import Group, RenderableType
 from rich.highlighter import ReprHighlighter
 from rich.padding import Padding
 from rich.panel import Panel
-import rich.repr
 from rich.syntax import Syntax
 from rich.text import Text
 
+from ..suggestions import get_suggestion
 from ._error_tools import friendly_list
+from .constants import VALID_PSEUDO_CLASSES
 
 
 class TokenError(Exception):
@@ -28,11 +30,11 @@ class TokenError(Exception):
     ) -> None:
         """
         Args:
-            path (str): Path to source or "<object>" if source is parsed from a literal.
-            code (str): The code being parsed.
-            start (tuple[int, int]): Line number of the error.
-            message (str): A message associated with the error.
-            end (tuple[int, int] | None): End location of token, or None if not known. Defaults to None.
+            path: Path to source or "<object>" if source is parsed from a literal.
+            code: The code being parsed.
+            start: Line number of the error.
+            message: A message associated with the error.
+            end: End location of token, or None if not known.
         """
 
         self.path = path
@@ -45,7 +47,7 @@ class TokenError(Exception):
         """Get a short snippet of code around a given line number.
 
         Returns:
-            Panel: A renderable.
+            A renderable.
         """
         line_no = self.start[0]
         # TODO: Highlight column number
@@ -56,7 +58,7 @@ class TokenError(Exception):
             line_numbers=True,
             indent_guides=True,
             line_range=(max(0, line_no - 2), line_no + 2),
-            highlight_lines={line_no},
+            highlight_lines={line_no + 1},
         )
         syntax.stylize_range("reverse bold", self.start, self.end)
         return Panel(syntax, border_style="red")
@@ -227,6 +229,29 @@ class Tokenizer:
             (line_no, col_no),
             referenced_by=None,
         )
+
+        if (
+            token.name == "pseudo_class"
+            and token.value.strip(":") not in VALID_PSEUDO_CLASSES
+        ):
+            pseudo_class = token.value.strip(":")
+            suggestion = get_suggestion(pseudo_class, list(VALID_PSEUDO_CLASSES))
+            all_valid = f"must be one of {friendly_list(VALID_PSEUDO_CLASSES)}"
+            if suggestion:
+                raise TokenError(
+                    self.path,
+                    self.code,
+                    (line_no, col_no),
+                    f"unknown pseudo-class {pseudo_class!r}; did you mean {suggestion!r}?; {all_valid}",
+                )
+            else:
+                raise TokenError(
+                    self.path,
+                    self.code,
+                    (line_no, col_no),
+                    f"unknown pseudo-class {pseudo_class!r}; {all_valid}",
+                )
+
         col_no += len(value)
         if col_no >= len(line):
             line_no += 1

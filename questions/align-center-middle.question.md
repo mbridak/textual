@@ -2,8 +2,11 @@
 title: "How do I center a widget in a screen?"
 alt_titles:
   - "centre a widget"
+  - "centre widgets"
   - "center a control"
   - "centre a control"
+  - "center controls"
+  - "centre controls"
 ---
 
 To center a widget within a container use
@@ -28,6 +31,66 @@ class ButtonApp(App):
 
     def compose(self) -> ComposeResult:
         yield Button("PUSH ME!")
+
+if __name__ == "__main__":
+    ButtonApp().run()
+```
+
+If you use the above on multiple widgets, you'll find they appear to
+"left-align" in the center of the screen, like this:
+
+```
++-----+
+|     |
++-----+
+
++---------+
+|         |
++---------+
+
++---------------+
+|               |
++---------------+
+```
+
+If you want them more like this:
+
+```
+     +-----+
+     |     |
+     +-----+
+
+   +---------+
+   |         |
+   +---------+
+
++---------------+
+|               |
++---------------+
+```
+
+the best approach is to wrap each widget in a [`Center`
+container](https://textual.textualize.io/api/containers/#textual.containers.Center)
+that individually centers it. For example:
+
+```python
+from textual.app import App, ComposeResult
+from textual.containers import Center
+from textual.widgets import Button
+
+class ButtonApp(App):
+
+    CSS = """
+    Screen {
+        align: center middle;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Center(Button("PUSH ME!"))
+        yield Center(Button("AND ME!"))
+        yield Center(Button("ALSO PLEASE PUSH ME!"))
+        yield Center(Button("HEY ME ALSO!!"))
 
 if __name__ == "__main__":
     ButtonApp().run()

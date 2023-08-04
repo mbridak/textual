@@ -8,7 +8,7 @@ from textual.css.parse import substitute_references
 from textual.css.scalar import Scalar, Unit
 from textual.css.stylesheet import Stylesheet, StylesheetParseError
 from textual.css.tokenize import tokenize
-from textual.css.tokenizer import Token, ReferencedBy
+from textual.css.tokenizer import ReferencedBy, Token, TokenError
 from textual.css.transition import Transition
 from textual.geometry import Spacing
 from textual.layouts.vertical import VerticalLayout
@@ -219,6 +219,22 @@ class TestVariableReferenceSubstitution:
         css = ".thing { border: $not-defined; }"
         with pytest.raises(UnresolvedVariableError):
             list(substitute_references(tokenize(css, "")))
+
+    def test_empty_variable(self):
+        css = "$x:\n* { background:$x; }"
+        result = list(substitute_references(tokenize(css, "")))
+        assert [(t.name, t.value) for t in result] == [
+            ("variable_name", "$x:"),
+            ("variable_value_end", "\n"),
+            ("selector_start_universal", "*"),
+            ("whitespace", " "),
+            ("declaration_set_start", "{"),
+            ("whitespace", " "),
+            ("declaration_name", "background:"),
+            ("declaration_end", ";"),
+            ("whitespace", " "),
+            ("declaration_set_end", "}"),
+        ]
 
     def test_transitive_reference(self):
         css = "$x: 1\n$y: $x\n.thing { border: $y }"
@@ -1189,3 +1205,58 @@ class TestParseTextAlign:
         stylesheet = Stylesheet()
         stylesheet.add_source(css)
         assert stylesheet.rules[0].styles.text_align == "start"
+
+
+class TestTypeNames:
+    def test_type_no_number(self):
+        stylesheet = Stylesheet()
+        stylesheet.add_source("TestType {}")
+        assert len(stylesheet.rules) == 1
+
+    def test_type_with_number(self):
+        stylesheet = Stylesheet()
+        stylesheet.add_source("TestType1 {}")
+        assert len(stylesheet.rules) == 1
+
+    def test_type_starts_with_number(self):
+        stylesheet = Stylesheet()
+        stylesheet.add_source("1TestType {}")
+        with pytest.raises(TokenError):
+            stylesheet.parse()
+
+    def test_combined_type_no_number(self):
+        for separator in " >,":
+            stylesheet = Stylesheet()
+            stylesheet.add_source(f"StartType {separator} TestType {{}}")
+            assert len(stylesheet.rules) == 1
+
+    def test_combined_type_with_number(self):
+        for separator in " >,":
+            stylesheet = Stylesheet()
+            stylesheet.add_source(f"StartType {separator} TestType1 {{}}")
+            assert len(stylesheet.rules) == 1
+
+    def test_combined_type_starts_with_number(self):
+        for separator in " >,":
+            stylesheet = Stylesheet()
+            stylesheet.add_source(f"StartType {separator} 1TestType {{}}")
+            with pytest.raises(TokenError):
+                stylesheet.parse()
+
+
+def test_parse_bad_psuedo_selector():
+    """Check unknown selector raises a token error."""
+
+    bad_selector = """\
+Widget:foo{
+    border: red;
+}
+    """
+
+    stylesheet = Stylesheet()
+    stylesheet.add_source(bad_selector, "foo")
+
+    with pytest.raises(TokenError) as error:
+        stylesheet.parse()
+
+    assert error.value.start == (0, 6)

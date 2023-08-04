@@ -2,8 +2,8 @@ import pytest
 
 from textual.app import App, ComposeResult
 from textual.containers import Container
+from textual.css.query import InvalidQueryFormat, NoMatches, TooManyMatches, WrongType
 from textual.widget import Widget
-from textual.css.query import InvalidQueryFormat, WrongType, NoMatches, TooManyMatches
 
 
 def test_query():
@@ -151,6 +151,25 @@ def test_query_classes():
 
     # Now, let's check there are *no* children with the test class.
     assert len(app.query(".test")) == 0
+
+    # Add classes via set_classes
+    app.query(ClassTest).set_classes("foo bar")
+    assert (len(app.query(".foo"))) == CHILD_COUNT
+    assert (len(app.query(".bar"))) == CHILD_COUNT
+
+    # Reset classes
+    app.query(ClassTest).set_classes("")
+    assert (len(app.query(".foo"))) == 0
+    assert (len(app.query(".bar"))) == 0
+
+    # Repeat, to check setting empty iterable
+    app.query(ClassTest).set_classes("foo bar")
+    assert (len(app.query(".foo"))) == CHILD_COUNT
+    assert (len(app.query(".bar"))) == CHILD_COUNT
+
+    app.query(ClassTest).set_classes([])
+    assert (len(app.query(".foo"))) == 0
+    assert (len(app.query(".bar"))) == 0
 
     # Add the test class to everything and then check again.
     app.query(ClassTest).add_class("test")

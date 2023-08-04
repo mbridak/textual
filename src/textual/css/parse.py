@@ -2,25 +2,24 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import PurePath
-from typing import Iterator, Iterable, NoReturn
+from typing import Iterable, Iterator, NoReturn
 
-from rich import print
-
+from ..suggestions import get_suggestion
+from ._help_renderables import HelpText
+from ._styles_builder import DeclarationError, StylesBuilder
 from .errors import UnresolvedVariableError
-from .types import Specificity3
-from ._styles_builder import StylesBuilder, DeclarationError
 from .model import (
+    CombinatorType,
     Declaration,
     RuleSet,
     Selector,
-    CombinatorType,
     SelectorSet,
     SelectorType,
 )
 from .styles import Styles
-from ..suggestions import get_suggestion
-from .tokenize import tokenize, tokenize_declarations, Token, tokenize_values
+from .tokenize import Token, tokenize, tokenize_declarations, tokenize_values
 from .tokenizer import EOFError, ReferencedBy
+from .types import Specificity3
 
 SELECTOR_MAP: dict[str, tuple[SelectorType, Specificity3]] = {
     "selector": (SelectorType.TYPE, (0, 0, 1)),
@@ -36,7 +35,6 @@ SELECTOR_MAP: dict[str, tuple[SelectorType, Specificity3]] = {
 
 @lru_cache(maxsize=1024)
 def parse_selectors(css_selectors: str) -> tuple[SelectorSet, ...]:
-
     if not css_selectors.strip():
         return ()
 
@@ -133,7 +131,7 @@ def parse_rule_set(
 
     declaration = Declaration(token, "")
 
-    errors: list[tuple[Token, str]] = []
+    errors: list[tuple[Token, str | HelpText]] = []
 
     while True:
         token = next(tokens)
@@ -174,18 +172,18 @@ def parse_declarations(css: str, path: str) -> Styles:
     """Parse declarations and return a Styles object.
 
     Args:
-        css (str): String containing CSS.
-        path (str): Path to the CSS, or something else to identify the location.
+        css: String containing CSS.
+        path: Path to the CSS, or something else to identify the location.
 
     Returns:
-        Styles: A styles object.
+        A styles object.
     """
 
     tokens = iter(tokenize_declarations(css, path))
     styles_builder = StylesBuilder()
 
     declaration: Declaration | None = None
-    errors: list[tuple[Token, str]] = []
+    errors: list[tuple[Token, str | HelpText]] = []
 
     while True:
         token = next(tokens, None)
@@ -223,13 +221,12 @@ def _unresolved(variable_name: str, variables: Iterable[str], token: Token) -> N
     """Raise a TokenError regarding an unresolved variable.
 
     Args:
-        variable_name (str): A variable name.
-        variables (Iterable[str]): Possible choices used to generate suggestion.
-        token (Token): The Token.
+        variable_name: A variable name.
+        variables: Possible choices used to generate suggestion.
+        token: The Token.
 
     Raises:
         UnresolvedVariableError: Always raises a TokenError.
-
     """
     message = f"reference to undefined variable '${variable_name}'"
     suggested_variable = get_suggestion(variable_name, list(variables))
@@ -252,11 +249,11 @@ def substitute_references(
     tokens with the tokens representing their values.
 
     Args:
-        tokens (Iterable[Token]): Iterator of Tokens which may contain tokens
+        tokens: Iterator of Tokens which may contain tokens
             with the name "variable_ref".
 
     Returns:
-        Iterable[Token]: Yields Tokens such that any variable references (tokens where
+        Yields Tokens such that any variable references (tokens where
             token.name == "variable_ref") have been replaced with the tokens representing
             the value. In other words, an Iterable of Tokens similar to the original input,
             but with variables resolved. Substituted tokens will have their referenced_by
@@ -266,18 +263,18 @@ def substitute_references(
 
     iter_tokens = iter(tokens)
 
-    while tokens:
+    while True:
         token = next(iter_tokens, None)
         if token is None:
             break
         if token.name == "variable_name":
             variable_name = token.value[1:-1]  # Trim the $ and the :, i.e. "$x:" -> "x"
+            variable_tokens = variables.setdefault(variable_name, [])
             yield token
 
             while True:
                 token = next(iter_tokens, None)
-                # TODO: Mypy error looks legit
-                if token.name == "whitespace":
+                if token is not None and token.name == "whitespace":
                     yield token
                 else:
                     break
@@ -288,7 +285,7 @@ def substitute_references(
                 if not token:
                     break
                 elif token.name == "whitespace":
-                    variables.setdefault(variable_name, []).append(token)
+                    variable_tokens.append(token)
                     yield token
                 elif token.name == "variable_value_end":
                     yield token
@@ -297,7 +294,6 @@ def substitute_references(
                 elif token.name == "variable_ref":
                     ref_name = token.value[1:]
                     if ref_name in variables:
-                        variable_tokens = variables.setdefault(variable_name, [])
                         reference_tokens = variables[ref_name]
                         variable_tokens.extend(reference_tokens)
                         ref_location = token.location
@@ -311,7 +307,7 @@ def substitute_references(
                     else:
                         _unresolved(ref_name, variables.keys(), token)
                 else:
-                    variables.setdefault(variable_name, []).append(token)
+                    variable_tokens.append(token)
                     yield token
                 token = next(iter_tokens, None)
         elif token.name == "variable_ref":
@@ -343,10 +339,10 @@ def parse(
     and generating rule sets from it.
 
     Args:
-        css (str): The input CSS
-        path (str): Path to the CSS
-        variables (dict[str, str]): Substitution variables to substitute tokens for.
-        is_default_rules (bool): True if the rules we're extracting are
+        css: The input CSS
+        path: Path to the CSS
+        variables: Substitution variables to substitute tokens for.
+        is_default_rules: True if the rules we're extracting are
             default (i.e. in Widget.DEFAULT_CSS) rules. False if they're from user defined CSS.
     """
 

@@ -20,7 +20,7 @@ The first line sets the [background](../styles/background.md) style to `"darkblu
 
 The second line sets [border](../styles/border.md) to a tuple of `("heavy", "white")` which tells Textual to draw a white border with a style of `"heavy"`. Running this code will show the following:
 
-```{.textual path="docs/examples/guide/styles/screen.py" press="_"}
+```{.textual path="docs/examples/guide/styles/screen.py"}
 ```
 
 ## Styling widgets
@@ -151,11 +151,11 @@ If you run this you will see the height of the widget now grows to accommodate t
 ```{.textual path="docs/examples/guide/styles/dimensions02.py"}
 ```
 
-#### Units
+### Units
 
 Textual offers a few different *units* which allow you to specify dimensions relative to the screen or container. Relative units can better make use of available space if the user resizes the terminal.
 
-- Percentage units are given as a string containing a number followed by a percentage symbol, e.g. `"50%"`. Setting a dimension to a percentage unit will cause it to fit in that percentage of the available space. For instance, setting width to `"50%"` will cause the width of the widget to be half the available space.
+- Percentage units are given as a number followed by a percent (`%`) symbol and will set a dimension to a proportion of the widget's *parent* size. For instance, setting width to `"50%"` will cause a widget to be half the width of its parent.
 - View units are similar to percentage units, but explicitly reference a dimension. The `vw` unit sets a dimension to a percentage of the terminal *width*, and `vh` sets a dimension to a percentage of the terminal *height*.
 - The `w` unit sets a dimension to a percentage of the available width (which may be smaller than the terminal size if the widget is within another widget).
 - The `h` unit sets a dimension to a percentage of the available height.
@@ -184,6 +184,8 @@ With the width set to `"50%"` and the height set to `"80%"`, the widget will kee
 
     ```{.textual path="docs/examples/guide/styles/dimensions03.py" columns="120" lines="40"}
     ```
+
+#### FR units
 
 Percentage units can be problematic for some relative values. For instance, if we want to divide the screen into thirds, we would have to set a dimension to `33.3333333333%` which is awkward. Textual supports `fr` units which are often better than percentage-based units for these situations.
 
@@ -241,7 +243,7 @@ The [border](../styles/border.md) style draws a border around a widget. To add a
 
 The following example adds a border around a widget:
 
-```python title="border01.py" hl_lines="22"
+```python title="border01.py" hl_lines="21"
 --8<-- "docs/examples/guide/styles/border01.py"
 ```
 
@@ -255,6 +257,28 @@ There are many other border types. Run the following from the command prompt to 
 
 ```bash
 textual borders
+```
+
+
+#### Title alignment
+
+Widgets have two attributes, `border_title` and `border_subtitle` which (if set) will be displayed within the border.
+The `border_title` attribute is displayed in the top border, and `border_subtitle` is displayed in the bottom border.
+
+There are two styles to set the alignment of these border labels, which may be set to "left", "right", or "center".
+
+ - [`border-title-align`](../styles/border_title_align.md) sets the alignment of the title, which defaults to "left".
+ - [`border-subtitle-align`](../styles/border_subtitle_align.md) sets the alignment of the subtitle, which defaults to "right".
+
+The following example sets both titles and changes the alignment of the title (top) to "center".
+
+```py hl_lines="22-24"
+--8<-- "docs/examples/guide/styles/border_title.py"
+```
+
+Note the addition of the titles and their alignments:
+
+```{.textual path="docs/examples/guide/styles/border_title.py"}
 ```
 
 ### Outline
@@ -297,7 +321,7 @@ The following example creates two widgets with a width of 30, a height of 6, and
 The first widget has the default `box_sizing` (`"border-box"`).
 The second widget sets `box_sizing` to `"content-box"`.
 
-```python title="box_sizing01.py" hl_lines="33"
+```python title="box_sizing01.py" hl_lines="32"
 --8<-- "docs/examples/guide/styles/box_sizing01.py"
 ```
 

@@ -1,15 +1,14 @@
 from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 import rich.repr
 
-from .geometry import Region
 from ._types import CallbackType
+from .geometry import Region
 from .message import Message
 
-
 if TYPE_CHECKING:
-    from .message_pump import MessagePump
     from .widget import Widget
 
 
@@ -25,12 +24,11 @@ class ExitApp(Message, verbose=True):
 
 @rich.repr.auto
 class Update(Message, verbose=True):
-    def __init__(self, sender: MessagePump, widget: Widget):
-        super().__init__(sender)
+    def __init__(self, widget: Widget):
+        super().__init__()
         self.widget = widget
 
     def __rich_repr__(self) -> rich.repr.Result:
-        yield self.sender
         yield self.widget
 
     def __eq__(self, other: object) -> bool:
@@ -45,15 +43,27 @@ class Update(Message, verbose=True):
 
 @rich.repr.auto
 class Layout(Message, verbose=True):
+    """Sent by Textual when a layout is required."""
+
     def can_replace(self, message: Message) -> bool:
         return isinstance(message, Layout)
 
 
 @rich.repr.auto
+class UpdateScroll(Message, verbose=True):
+    """Sent by Textual when a scroll update is required."""
+
+    def can_replace(self, message: Message) -> bool:
+        return isinstance(message, UpdateScroll)
+
+
+@rich.repr.auto
 class InvokeLater(Message, verbose=True, bubble=False):
-    def __init__(self, sender: MessagePump, callback: CallbackType) -> None:
+    """Sent by Textual to invoke a callback."""
+
+    def __init__(self, callback: CallbackType) -> None:
         self.callback = callback
-        super().__init__(sender)
+        super().__init__()
 
     def __rich_repr__(self) -> rich.repr.Result:
         yield "callback", self.callback
@@ -63,18 +73,9 @@ class InvokeLater(Message, verbose=True, bubble=False):
 class ScrollToRegion(Message, bubble=False):
     """Ask the parent to scroll a given region in to view."""
 
-    def __init__(self, sender: MessagePump, region: Region) -> None:
+    def __init__(self, region: Region) -> None:
         self.region = region
-        super().__init__(sender)
-
-
-@rich.repr.auto
-class StylesUpdated(Message, verbose=True):
-    def __init__(self, sender: MessagePump) -> None:
-        super().__init__(sender)
-
-    def can_replace(self, message: Message) -> bool:
-        return isinstance(message, StylesUpdated)
+        super().__init__()
 
 
 class Prompt(Message, no_dispatch=True):

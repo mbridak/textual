@@ -39,9 +39,11 @@ from .constants import (
     VALID_ALIGN_VERTICAL,
     VALID_BORDER,
     VALID_BOX_SIZING,
+    VALID_CONSTRAIN,
     VALID_DISPLAY,
     VALID_EDGE,
     VALID_OVERFLOW,
+    VALID_OVERLAY,
     VALID_SCROLLBAR_GUTTER,
     VALID_STYLE_FLAGS,
     VALID_TEXT_ALIGN,
@@ -67,11 +69,11 @@ def _join_tokens(tokens: Iterable[Token], joiner: str = "") -> str:
     """Convert tokens into a string by joining their values
 
     Args:
-        tokens (Iterable[Token]): Tokens to join
-        joiner (str): String to join on, defaults to ""
+        tokens: Tokens to join
+        joiner: String to join on.
 
     Returns:
-        str: The tokens, joined together to form a string.
+        The tokens, joined together to form a string.
     """
     return joiner.join(token.value for token in tokens)
 
@@ -113,7 +115,6 @@ class StylesBuilder:
                     suggested_property_name=suggested_property_name,
                 ),
             )
-            return
 
         tokens = declaration.tokens
 
@@ -135,7 +136,7 @@ class StylesBuilder:
         i.e. the ones for which we have a `process_[property name]` method
 
         Returns:
-            Sequence[str]: All the "Python-ised" CSS property names this class can handle.
+            All the "Python-ised" CSS property names this class can handle.
 
         Example: ("width", "background", "offset_x", ...)
         """
@@ -173,16 +174,22 @@ class StylesBuilder:
         """Process a declaration that expects an enum.
 
         Args:
-            name (str): Name of declaration.
-            tokens (list[Token]): Tokens from parser.
-            valid_values (list[str]): A set of valid values.
+            name: Name of declaration.
+            tokens: Tokens from parser.
+            valid_values: A set of valid values.
 
         Returns:
-            bool: True if the value is valid or False if it is invalid (also generates an error)
+            True if the value is valid or False if it is invalid (also generates an error)
         """
 
         if len(tokens) != 1:
-            string_enum_help_text(name, valid_values=list(valid_values), context="css"),
+            self.error(
+                name,
+                tokens[0],
+                string_enum_help_text(
+                    name, valid_values=list(valid_values), context="css"
+                ),
+            )
 
         token = tokens[0]
         token_name, value, _, _, location, _ = token
@@ -239,13 +246,30 @@ class StylesBuilder:
             return
         if len(tokens) == 1:
             try:
-                self.styles._rules[name.replace("-", "_")] = Scalar.parse(
+                self.styles._rules[name.replace("-", "_")] = Scalar.parse(  # type: ignore
                     tokens[0].value
                 )
             except ScalarParseError:
                 scalar_error()
         else:
             scalar_error()
+
+    def _distribute_importance(self, prefix: str, suffixes: tuple[str, ...]) -> None:
+        """Distribute importance amongst all aspects of the given style.
+
+        Args:
+            prefix: The prefix of the style.
+            siffixes: The suffixes to distribute amongst.
+
+        A number of styles can be set with the 'prefix' of the style,
+        providing the values as a series of parameters; or they can be set
+        with specific suffixes. Think `border` vs `border-left`, etc. This
+        method is used to ensure that if the former is set, `!important` is
+        distributed amongst all the suffixes.
+        """
+        if prefix in self.styles.important:
+            self.styles.important.remove(prefix)
+            self.styles.important.update(f"{prefix}_{suffix}" for suffix in suffixes)
 
     def process_box_sizing(self, name: str, tokens: list[Token]) -> None:
         for token in tokens:
@@ -299,6 +323,7 @@ class StylesBuilder:
         )
         rules["overflow_x"] = cast(Overflow, overflow_x)
         rules["overflow_y"] = cast(Overflow, overflow_y)
+        self._distribute_importance("overflow", ("x", "y"))
 
     def process_overflow_x(self, name: str, tokens: list[Token]) -> None:
         self.styles._rules["overflow_x"] = cast(
@@ -390,7 +415,7 @@ class StylesBuilder:
                     name, num_values_supplied=len(space), context="css"
                 ),
             )
-        self.styles._rules[name] = Spacing.unpack(cast(SpacingDimensions, tuple(space)))
+        self.styles._rules[name] = Spacing.unpack(cast(SpacingDimensions, tuple(space)))  # type: ignore
 
     def _process_space_partial(self, name: str, tokens: list[Token]) -> None:
         """Process granular margin / padding declarations."""
@@ -418,7 +443,7 @@ class StylesBuilder:
         spacing_list = list(current_spacing)
         spacing_list[_EDGE_SPACING_MAP[edge]] = space
 
-        self.styles._rules[style_name] = Spacing(*spacing_list)
+        self.styles._rules[style_name] = Spacing(*spacing_list)  # type: ignore
 
     process_padding = _process_space
     process_margin = _process_space
@@ -434,9 +459,9 @@ class StylesBuilder:
     process_padding_left = _process_space_partial
 
     def _parse_border(self, name: str, tokens: list[Token]) -> BorderValue:
-
         border_type: EdgeType = "solid"
         border_color = Color(0, 255, 0)
+        border_alpha: float | None = None
 
         def border_value_error():
             self.error(name, token, border_property_help_text(name, context="css"))
@@ -445,7 +470,7 @@ class StylesBuilder:
             token_name, value, _, _, _, _ = token
             if token_name == "token":
                 if value in VALID_BORDER:
-                    border_type = value
+                    border_type = value  # type: ignore
                 else:
                     try:
                         border_color = Color.parse(value)
@@ -458,20 +483,30 @@ class StylesBuilder:
                 except ColorParseError:
                     border_value_error()
 
+            elif token_name == "scalar":
+                alpha_scalar = Scalar.parse(token.value)
+                if alpha_scalar.unit != Unit.PERCENT:
+                    self.error(name, token, "alpha must be given as a percentage.")
+                border_alpha = alpha_scalar.value / 100.0
+
             else:
                 border_value_error()
+
+        if border_alpha is not None:
+            border_color = border_color.multiply_alpha(border_alpha)
 
         return normalize_border_value((border_type, border_color))
 
     def _process_border_edge(self, edge: str, name: str, tokens: list[Token]) -> None:
         border = self._parse_border(name, tokens)
-        self.styles._rules[f"border_{edge}"] = border
+        self.styles._rules[f"border_{edge}"] = border  # type: ignore
 
     def process_border(self, name: str, tokens: list[Token]) -> None:
         border = self._parse_border(name, tokens)
         rules = self.styles._rules
         rules["border_top"] = rules["border_right"] = border
         rules["border_bottom"] = rules["border_left"] = border
+        self._distribute_importance("border", ("top", "left", "bottom", "right"))
 
     def process_border_top(self, name: str, tokens: list[Token]) -> None:
         self._process_border_edge("top", name, tokens)
@@ -487,18 +522,19 @@ class StylesBuilder:
 
     def _process_outline(self, edge: str, name: str, tokens: list[Token]) -> None:
         border = self._parse_border(name, tokens)
-        self.styles._rules[f"outline_{edge}"] = border
+        self.styles._rules[f"outline_{edge}"] = border  # type: ignore
 
     def process_outline(self, name: str, tokens: list[Token]) -> None:
         border = self._parse_border(name, tokens)
         rules = self.styles._rules
         rules["outline_top"] = rules["outline_right"] = border
         rules["outline_bottom"] = rules["outline_left"] = border
+        self._distribute_importance("outline", ("top", "left", "bottom", "right"))
 
     def process_outline_top(self, name: str, tokens: list[Token]) -> None:
         self._process_outline("top", name, tokens)
 
-    def process_parse_border_right(self, name: str, tokens: list[Token]) -> None:
+    def process_outline_right(self, name: str, tokens: list[Token]) -> None:
         self._process_outline("right", name, tokens)
 
     def process_outline_bottom(self, name: str, tokens: list[Token]) -> None:
@@ -580,14 +616,14 @@ class StylesBuilder:
         color: Color | None = None
         alpha: float | None = None
 
-        self.styles._rules[f"auto_{name}"] = False
+        self.styles._rules[f"auto_{name}"] = False  # type: ignore
         for token in tokens:
             if (
                 "background" not in name
                 and token.name == "token"
                 and token.value == "auto"
             ):
-                self.styles._rules[f"auto_{name}"] = True
+                self.styles._rules[f"auto_{name}"] = True  # type: ignore
             elif token.name == "scalar":
                 alpha_scalar = Scalar.parse(token.value)
                 if alpha_scalar.unit != Unit.PERCENT:
@@ -608,8 +644,8 @@ class StylesBuilder:
 
         if color is not None or alpha is not None:
             if alpha is not None:
-                color = (color or Color(255, 255, 255)).with_alpha(alpha)
-            self.styles._rules[name] = color
+                color = (color or Color(255, 255, 255)).multiply_alpha(alpha)
+            self.styles._rules[name] = color  # type: ignore
 
     process_tint = process_color
     process_background = process_color
@@ -626,6 +662,11 @@ class StylesBuilder:
     process_link_hover_color = process_color
     process_link_hover_background = process_color
 
+    process_border_title_color = process_color
+    process_border_title_background = process_color
+    process_border_subtitle_color = process_color
+    process_border_subtitle_background = process_color
+
     def process_text_style(self, name: str, tokens: list[Token]) -> None:
         for token in tokens:
             value = token.value
@@ -637,10 +678,13 @@ class StylesBuilder:
                 )
 
         style_definition = " ".join(token.value for token in tokens)
-        self.styles._rules[name.replace("-", "_")] = style_definition
+        self.styles._rules[name.replace("-", "_")] = style_definition  # type: ignore
 
     process_link_style = process_text_style
     process_link_hover_style = process_text_style
+
+    process_border_title_style = process_text_style
+    process_border_subtitle_style = process_text_style
 
     def process_text_align(self, name: str, tokens: list[Token]) -> None:
         """Process a text-align declaration"""
@@ -654,7 +698,7 @@ class StylesBuilder:
                 text_align_help_text(),
             )
 
-        self.styles._rules["text_align"] = tokens[0].value
+        self.styles._rules["text_align"] = tokens[0].value  # type: ignore
 
     def process_dock(self, name: str, tokens: list[Token]) -> None:
         if not tokens:
@@ -767,8 +811,10 @@ class StylesBuilder:
             align_error(name, token_horizontal)
 
         name = name.replace("-", "_")
-        self.styles._rules[f"{name}_horizontal"] = token_horizontal.value
-        self.styles._rules[f"{name}_vertical"] = token_vertical.value
+        self.styles._rules[f"{name}_horizontal"] = token_horizontal.value  # type: ignore
+        self.styles._rules[f"{name}_vertical"] = token_vertical.value  # type: ignore
+
+        self._distribute_importance(name, ("horizontal", "vertical"))
 
     def process_align_horizontal(self, name: str, tokens: list[Token]) -> None:
         try:
@@ -780,7 +826,7 @@ class StylesBuilder:
                 string_enum_help_text(name, VALID_ALIGN_HORIZONTAL, context="css"),
             )
         else:
-            self.styles._rules[name.replace("-", "_")] = value
+            self.styles._rules[name.replace("-", "_")] = value  # type: ignore
 
     def process_align_vertical(self, name: str, tokens: list[Token]) -> None:
         try:
@@ -792,11 +838,14 @@ class StylesBuilder:
                 string_enum_help_text(name, VALID_ALIGN_VERTICAL, context="css"),
             )
         else:
-            self.styles._rules[name.replace("-", "_")] = value
+            self.styles._rules[name.replace("-", "_")] = value  # type: ignore
 
     process_content_align = process_align
     process_content_align_horizontal = process_align_horizontal
     process_content_align_vertical = process_align_vertical
+
+    process_border_title_align = process_align_horizontal
+    process_border_subtitle_align = process_align_horizontal
 
     def process_scrollbar_gutter(self, name: str, tokens: list[Token]) -> None:
         try:
@@ -808,7 +857,7 @@ class StylesBuilder:
                 string_enum_help_text(name, VALID_SCROLLBAR_GUTTER, context="css"),
             )
         else:
-            self.styles._rules[name.replace("-", "_")] = value
+            self.styles._rules[name.replace("-", "_")] = value  # type: ignore
 
     def process_scrollbar_size(self, name: str, tokens: list[Token]) -> None:
         def scrollbar_size_error(name: str, token: Token) -> None:
@@ -834,6 +883,7 @@ class StylesBuilder:
                 scrollbar_size_error(name, token2)
             self.styles._rules["scrollbar_size_horizontal"] = horizontal
             self.styles._rules["scrollbar_size_vertical"] = vertical
+            self._distribute_importance("scrollbar_size", ("horizontal", "vertical"))
 
     def process_scrollbar_size_vertical(self, name: str, tokens: list[Token]) -> None:
         if not tokens:
@@ -865,23 +915,19 @@ class StylesBuilder:
 
     def _process_grid_rows_or_columns(self, name: str, tokens: list[Token]) -> None:
         scalars: list[Scalar] = []
+        percent_unit = Unit.WIDTH if name == "grid-columns" else Unit.HEIGHT
         for token in tokens:
             if token.name == "number":
                 scalars.append(Scalar.from_number(float(token.value)))
             elif token.name == "scalar":
-                scalars.append(
-                    Scalar.parse(
-                        token.value,
-                        percent_unit=Unit.WIDTH if name == "rows" else Unit.HEIGHT,
-                    )
-                )
+                scalars.append(Scalar.parse(token.value, percent_unit=percent_unit))
             else:
                 self.error(
                     name,
                     token,
                     table_rows_or_columns_help_text(name, token.value, context="css"),
                 )
-        self.styles._rules[name.replace("-", "_")] = scalars
+        self.styles._rules[name.replace("-", "_")] = scalars  # type: ignore
 
     process_grid_rows = _process_grid_rows_or_columns
     process_grid_columns = _process_grid_rows_or_columns
@@ -898,7 +944,7 @@ class StylesBuilder:
             value = int(token.value)
             if value == 0:
                 self.error(name, token, integer_help_text(name))
-            self.styles._rules[name.replace("-", "_")] = value
+            self.styles._rules[name.replace("-", "_")] = value  # type: ignore
 
     process_grid_gutter_horizontal = _process_integer
     process_grid_gutter_vertical = _process_integer
@@ -959,15 +1005,39 @@ class StylesBuilder:
         else:
             self.error(name, tokens[0], "expected two integers here")
 
+    def process_overlay(self, name: str, tokens: list[Token]) -> None:
+        try:
+            value = self._process_enum(name, tokens, VALID_OVERLAY)
+        except StyleValueError:
+            self.error(
+                name,
+                tokens[0],
+                string_enum_help_text(name, VALID_OVERLAY, context="css"),
+            )
+        else:
+            self.styles._rules[name] = value  # type: ignore
+
+    def process_constrain(self, name: str, tokens: list[Token]) -> None:
+        try:
+            value = self._process_enum(name, tokens, VALID_CONSTRAIN)
+        except StyleValueError:
+            self.error(
+                name,
+                tokens[0],
+                string_enum_help_text(name, VALID_CONSTRAIN, context="css"),
+            )
+        else:
+            self.styles._rules[name] = value  # type: ignore
+
     def _get_suggested_property_name_for_rule(self, rule_name: str) -> str | None:
         """
         Returns a valid CSS property "Python" name, or None if no close matches could be found.
 
         Args:
-            rule_name (str): An invalid "Python-ised" CSS property (i.e. "offst_x" rather than "offst-x")
+            rule_name: An invalid "Python-ised" CSS property (i.e. "offst_x" rather than "offst-x")
 
         Returns:
-            str | None: The closest valid "Python-ised" CSS property.
+            The closest valid "Python-ised" CSS property.
                 Returns `None` if no close matches could be found.
 
         Example: returns "background" for rule_name "bkgrund", "offset_x" for "ofset_x"

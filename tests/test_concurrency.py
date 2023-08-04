@@ -1,8 +1,9 @@
+from threading import Thread
+
 import pytest
 
-from threading import Thread
 from textual.app import App, ComposeResult
-from textual.widgets import TextLog
+from textual.widgets import RichLog
 
 
 def test_call_from_thread_app_not_running():
@@ -19,24 +20,24 @@ def test_call_from_thread():
     class BackgroundThread(Thread):
         """A background thread which will modify app in some way."""
 
-        def __init__(self, app: App) -> None:
+        def __init__(self, app: App[object]) -> None:
             self.app = app
             super().__init__()
 
         def run(self) -> None:
             def write_stuff(text: str) -> None:
                 """Write stuff to a widget."""
-                self.app.query_one(TextLog).write(text)
+                self.app.query_one(RichLog).write(text)
 
             self.app.call_from_thread(write_stuff, "Hello")
             # Exit the app with a code we can assert
             self.app.call_from_thread(self.app.exit, 123)
 
-    class ThreadTestApp(App):
+    class ThreadTestApp(App[object]):
         """Trivial app with a single widget."""
 
         def compose(self) -> ComposeResult:
-            yield TextLog()
+            yield RichLog()
 
         def on_ready(self) -> None:
             """Launch a thread which will modify the app."""
