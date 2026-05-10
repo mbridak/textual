@@ -15,7 +15,11 @@ class FruitsApp(App[None]):
     """
 
     def compose(self) -> ComposeResult:
+        yield Input("straw", suggester=SuggestFromList(fruits), select_on_focus=False)
         yield Input("straw", suggester=SuggestFromList(fruits))
+        yield Input("p", suggester=SuggestFromList(fruits))
+        yield Input("b", suggester=SuggestFromList(fruits))
+        yield Input("a", suggester=SuggestFromList(fruits))
 
 
 if __name__ == "__main__":

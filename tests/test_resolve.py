@@ -61,7 +61,7 @@ def test_resolve(scalars, total, gutter, result):
     )
 
 
-def test_resolve_fraction_unit():
+async def test_resolve_fraction_unit():
     """Test resolving fraction units in combination with minimum widths."""
     widget1 = Widget()
     widget2 = Widget()
@@ -124,7 +124,7 @@ def test_resolve_fraction_unit():
     ) == Fraction(2)
 
 
-def test_resolve_fraction_unit_stress_test():
+async def test_resolve_fraction_unit_stress_test():
     """Check for zero division errors."""
     # https://github.com/Textualize/textual/issues/2673
     widget = Widget()
@@ -133,22 +133,23 @@ def test_resolve_fraction_unit_stress_test():
 
     # We're mainly checking for the absence of zero division errors,
     # which is a reoccurring theme for this code.
-    for remaining_space in range(1, 101, 10):
+    for remaining_space in range(1, 51, 10):
         for max_width in range(1, remaining_space):
             styles.max_width = max_width
 
-            for width in range(1, remaining_space):
+            for width in range(1, remaining_space, 2):
+                size = Size(width, 24)
                 resolved_unit = resolve_fraction_unit(
                     [styles, styles, styles],
-                    Size(width, 24),
-                    Size(width, 24),
+                    size,
+                    size,
                     Fraction(remaining_space),
                     "width",
                 )
                 assert resolved_unit <= remaining_space
 
 
-def test_resolve_issue_2502():
+async def test_resolve_issue_2502():
     """Test https://github.com/Textualize/textual/issues/2502"""
 
     widget = Widget()

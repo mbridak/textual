@@ -16,13 +16,14 @@ class BaseScreen(Screen):
 
 
 class ScreenWithCSS(Screen):
+    SCOPED_CSS = False
     CSS = """
     #screen-css {
         background: #ff0000;
     }
     """
 
-    CSS_PATH = "test_screen_css.css"
+    CSS_PATH = "test_screen_css.tcss"
 
     def compose(self):
         yield Label("Hello, world!", id="app-css")
@@ -57,15 +58,15 @@ class SwitchBaseApp(BaseApp):
 
 
 def check_colors_before_screen_css(app: BaseApp):
-    assert app.query_one("#app-css").styles.background == GREEN
-    assert app.query_one("#screen-css-path").styles.background == GREEN
-    assert app.query_one("#screen-css").styles.background == GREEN
+    assert app.screen.query_one("#app-css").styles.background == GREEN
+    assert app.screen.query_one("#screen-css-path").styles.background == GREEN
+    assert app.screen.query_one("#screen-css").styles.background == GREEN
 
 
 def check_colors_after_screen_css(app: BaseApp):
-    assert app.query_one("#app-css").styles.background == GREEN
-    assert app.query_one("#screen-css-path").styles.background == BLUE
-    assert app.query_one("#screen-css").styles.background == RED
+    assert app.screen.query_one("#app-css").styles.background == GREEN
+    assert app.screen.query_one("#screen-css-path").styles.background == BLUE
+    assert app.screen.query_one("#screen-css").styles.background == RED
 
 
 async def test_screen_pushing_and_popping_does_not_reparse_css():
@@ -125,7 +126,7 @@ async def test_screen_css_push_screen_instance_by_name():
     """Check that screen CSS is loaded and applied when pushing a screen name that points to a screen instance."""
 
     class MyApp(BaseApp):
-        SCREENS = {"screenwithcss": ScreenWithCSS()}
+        SCREENS = {"screenwithcss": ScreenWithCSS}
 
         def key_p(self):
             self.push_screen("screenwithcss")
@@ -186,7 +187,7 @@ async def test_screen_css_switch_screen_instance_by_name():
     """Check that screen CSS is loaded and applied when switching a screen name that points to a screen instance."""
 
     class MyApp(SwitchBaseApp):
-        SCREENS = {"screenwithcss": ScreenWithCSS()}
+        SCREENS = {"screenwithcss": ScreenWithCSS}
 
         def key_p(self):
             self.switch_screen("screenwithcss")
@@ -209,7 +210,7 @@ async def test_screen_css_switch_screen_type_by_name():
     class MyApp(SwitchBaseApp):
         SCREENS = {"screenwithcss": ScreenWithCSS}
 
-        def key_p(self):
+        async def key_p(self):
             self.switch_screen("screenwithcss")
 
         def key_o(self):
@@ -229,8 +230,8 @@ async def test_screen_css_switch_mode_screen_instance():
 
     class MyApp(BaseApp):
         MODES = {
-            "base": BaseScreen(),
-            "mode": ScreenWithCSS(),
+            "base": BaseScreen,
+            "mode": ScreenWithCSS,
         }
 
         def key_p(self):
@@ -254,11 +255,11 @@ async def test_screen_css_switch_mode_screen_instance_by_name():
 
     class MyApp(BaseApp):
         SCREENS = {
-            "screenwithcss": ScreenWithCSS(),
+            "screenwithcss": ScreenWithCSS,
         }
 
         MODES = {
-            "base": BaseScreen(),
+            "base": BaseScreen,
             "mode": "screenwithcss",
         }
 
@@ -287,7 +288,7 @@ async def test_screen_css_switch_mode_screen_type_by_name():
         }
 
         MODES = {
-            "base": BaseScreen(),
+            "base": BaseScreen,
             "mode": "screenwithcss",
         }
 

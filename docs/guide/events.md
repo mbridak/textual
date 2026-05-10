@@ -20,7 +20,7 @@ This processing of messages is done within an asyncio Task which is started when
 
     The FastAPI docs have an [excellent introduction](https://fastapi.tiangolo.com/async/) to Python async programming.
 
-By way of an example, let's consider what happens if you were to type "Text" in to a `Input` widget. When you hit the ++t++ key, Textual creates a [key][textual.events.Key] event and sends it to the widget's message queue. Ditto for ++e++, ++x++, and ++t++.
+By way of an example, let's consider what happens if you were to type "Text" into a `Input` widget. When you hit the ++t++ key, Textual creates a [key][textual.events.Key] event and sends it to the widget's message queue. Ditto for ++e++, ++x++, and ++t++.
 
 The widget's task will pick the first message from the queue (a key event for the ++t++ key) and call the `on_key` method with the event as the first argument. In other words it will call `Input.on_key(event)`, which updates the display to show the new letter.
 
@@ -43,7 +43,7 @@ When the `on_key` method returns, Textual will get the next event from the queue
 
 You may be familiar with Python's [super](https://docs.python.org/3/library/functions.html#super) function to call a function defined in a base class. You will not have to use this in event handlers as Textual will automatically call handler methods defined in a widget's base class(es).
 
-For instance, let's say we are building the classic game of Pong and we have written a `Paddle` widget which extends [Static][textual.widgets.Static]. When a [Key][textual.events.Key] event arrives, Textual calls `Paddle.on_key` (to respond to ++left++ and ++right++ keys), then `Static.on_key`, and finally `Widget.on_key`.
+For instance, let's say we are building the classic game of Pong and we have written a `Paddle` widget which extends [Static][textual.widgets.Static]. When a [Key][textual.events.Key] event arrives, Textual calls `Paddle.on_key` (to respond to ++up++ and ++down++ keys), then `Static.on_key`, and finally `Widget.on_key`.
 
 ### Preventing default behaviors
 
@@ -157,7 +157,7 @@ Textual uses the following scheme to map messages classes on to a Python method.
 
 Messages have a namespace if they are defined as a child class of a Widget.
 The namespace is the name of the parent class.
-For instance, the builtin `Input` class defines it's `Changed` message as follow:
+For instance, the builtin `Input` class defines its `Changed` message as follows:
 
 ```python
 class Input(Widget):
@@ -210,6 +210,12 @@ In the following example we have three buttons, each of which does something dif
 
     1. The message handler is called when any button is pressed
 
+=== "on_decorator.tcss"
+
+    ```css title="on_decorator.tcss"
+    --8<-- "docs/examples/events/on_decorator.tcss"
+    ```
+
 === "Output"
 
     ```{.textual path="docs/examples/events/on_decorator01.py"}
@@ -233,6 +239,12 @@ The following example uses the decorator approach to write individual message ha
     2. Matches the button with class names "toggle" *and* "dark"
     3. Matches the button with an id of "quit"
 
+=== "on_decorator.tcss"
+
+    ```css title="on_decorator.tcss"
+    --8<-- "docs/examples/events/on_decorator.tcss"
+    ```
+
 === "Output"
 
     ```{.textual path="docs/examples/events/on_decorator02.py"}
@@ -240,8 +252,8 @@ The following example uses the decorator approach to write individual message ha
 
 While there are a few more lines of code, it is clearer what will happen when you click any given button.
 
-Note that the decorator requires that the message class has a `control` attribute which should be the widget associated with the message.
-Messages from builtin controls will have this attribute, but you may need to add `control` to any [custom messages](#custom-messages) you write.
+Note that the decorator requires that the message class has a `control` property which should return the widget associated with the message.
+Messages from builtin controls will have this attribute, but you may need to add a `control` property to any [custom messages](#custom-messages) you write.
 
 !!! note
 
@@ -256,7 +268,7 @@ The `on` decorator also accepts selectors as keyword arguments that may be used 
 The snippet below shows how to match the message [`TabbedContent.TabActivated`][textual.widgets.TabbedContent.TabActivated] only when the tab with id `home` was activated:
 
 ```py
-@on(TabbedContent.TabActivated, tab="#home")
+@on(TabbedContent.TabActivated, pane="#home")
 def home_tab(self) -> None:
     self.log("Switched back to home tab.")
     ...
@@ -308,13 +320,13 @@ Let's look at an example which looks up word definitions from an [api](https://d
 
 === "dictionary.py"
 
-    ```python title="dictionary.py" hl_lines="27"
+    ```python title="dictionary.py" hl_lines="28"
     --8<-- "docs/examples/events/dictionary.py"
     ```
-=== "dictionary.css"
+=== "dictionary.tcss"
 
-    ```python title="dictionary.css"
-    --8<-- "docs/examples/events/dictionary.css"
+    ```css title="dictionary.tcss"
+    --8<-- "docs/examples/events/dictionary.tcss"
     ```
 
 === "Output"
@@ -322,4 +334,4 @@ Let's look at an example which looks up word definitions from an [api](https://d
     ```{.textual path="docs/examples/events/dictionary.py"}
     ```
 
-Note the highlighted line in the above code which calls `asyncio.create_task` to run a coroutine in the background. Without this you would find typing in to the text box to be unresponsive.
+Note the highlighted line in the above code which calls `asyncio.create_task` to run a coroutine in the background. Without this you would find typing into the text box to be unresponsive.

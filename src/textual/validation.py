@@ -1,4 +1,10 @@
-"""Framework for validating string values"""
+"""
+
+This module provides a number of classes for validating input.
+
+See [Validating Input](/widgets/input/#validating-input) for details.
+
+"""
 
 from __future__ import annotations
 
@@ -104,7 +110,7 @@ class Failure:
 
 
 class Validator(ABC):
-    """Base class for the validation of string values.
+    '''Base class for the validation of string values.
 
     Commonly used in conjunction with the `Input` widget, which accepts a
     list of validators via its constructor. This validation framework can also be used to validate any 'stringly-typed'
@@ -114,13 +120,18 @@ class Validator(ABC):
 
     Example:
         ```python
+        def is_palindrome(value: str) -> bool:
+            """Check has string has the same code points left to right, as right to left."""
+            return value == value[::-1]
+
         class Palindrome(Validator):
             def validate(self, value: str) -> ValidationResult:
-                def is_palindrome(value: str) -> bool:
-                    return value == value[::-1]
-                return self.success() if is_palindrome(value) else self.failure("Not palindrome!")
+                if is_palindrome(value):
+                    return self.success()
+                else:
+                    return self.failure("Not a palindrome!")
         ```
-    """
+    '''
 
     def __init__(self, failure_description: str | None = None) -> None:
         self.failure_description = failure_description
@@ -136,11 +147,13 @@ class Validator(ABC):
     def validate(self, value: str) -> ValidationResult:
         """Validate the value and return a ValidationResult describing the outcome of the validation.
 
+        Implement this method when defining custom validators.
+
         Args:
             value: The value to validate.
 
         Returns:
-            The result of the validation.
+            The result of the validation ([`self.success()`][textual.validation.Validator.success) or [`self.failure(...)`][textual.validation.Validator.failure]).
         """
 
     def describe_failure(self, failure: Failure) -> str | None:
@@ -166,8 +179,7 @@ class Validator(ABC):
     def success(self) -> ValidationResult:
         """Shorthand for `ValidationResult(True)`.
 
-        You can return success() from a `Validator.validate` method implementation to signal
-        that validation has succeeded.
+        Return `self.success()` from [`validate()`][textual.validation.Validator.validate] to indicated that validation *succeeded*.
 
         Returns:
             A ValidationResult indicating validation succeeded.
@@ -182,7 +194,7 @@ class Validator(ABC):
     ) -> ValidationResult:
         """Shorthand for signaling validation failure.
 
-        You can return failure(...) from a `Validator.validate` implementation to signal validation succeeded.
+        Return `self.failure(...)` from [`validate()`][textual.validation.Validator.validate] to indicated that validation *failed*.
 
         Args:
             description: The failure description that will be used. When used in conjunction with the Input widget,
@@ -288,7 +300,7 @@ class Number(Validator):
         except ValueError:
             return ValidationResult.failure([Number.NotANumber(self, value)])
 
-        if float_value in {math.nan, math.inf, -math.inf}:
+        if math.isnan(float_value) or math.isinf(float_value):
             return ValidationResult.failure([Number.NotANumber(self, value)])
 
         if not self._validate_range(float_value):
@@ -315,7 +327,7 @@ class Number(Validator):
             A string description of the failure.
         """
         if isinstance(failure, Number.NotANumber):
-            return f"Must be a valid number."
+            return "Must be a valid number."
         elif isinstance(failure, Number.NotInRange):
             if self.minimum is None and self.maximum is not None:
                 return f"Must be less than or equal to {self.maximum}."
@@ -348,10 +360,10 @@ class Integer(Number):
             return number_validation_result
 
         # We know it's a number, but is that number an integer?
-        is_integer = float(value).is_integer()
-        if not is_integer:
+        try:
+            int_value = int(value)
+        except ValueError:
             return ValidationResult.failure([Integer.NotAnInteger(self, value)])
-
         return self.success()
 
     def describe_failure(self, failure: Failure) -> str | None:
@@ -363,8 +375,8 @@ class Integer(Number):
         Returns:
             A string description of the failure.
         """
-        if isinstance(failure, Integer.NotAnInteger):
-            return f"Must be a valid integer."
+        if isinstance(failure, (Integer.NotANumber, Integer.NotAnInteger)):
+            return "Must be a valid integer."
         elif isinstance(failure, Integer.NotInRange):
             if self.minimum is None and self.maximum is not None:
                 return f"Must be less than or equal to {self.maximum}."

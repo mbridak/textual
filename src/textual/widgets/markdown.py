@@ -1,3 +1,17 @@
-from ._markdown import Markdown, MarkdownBlock, MarkdownTableOfContents
+from textual.widgets._markdown import (
+    Markdown,
+    MarkdownBlock,
+    MarkdownFence,
+    MarkdownStream,
+    MarkdownTableOfContents,
+    TableOfContentsType,
+)
 
-__all__ = ["MarkdownTableOfContents", "Markdown", "MarkdownBlock"]
+__all__ = [
+    "Markdown",
+    "MarkdownBlock",
+    "MarkdownFence",
+    "MarkdownStream",
+    "MarkdownTableOfContents",
+    "TableOfContentsType",
+]

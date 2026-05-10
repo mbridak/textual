@@ -8,19 +8,19 @@ from typing import Iterable, NamedTuple
 
 import rich.repr
 
-from ..geometry import Offset, Size, clamp
+from textual.geometry import Offset, Size, clamp
 
 
 class ScalarError(Exception):
-    pass
+    """Base class for exceptions raised by the Scalar class."""
 
 
 class ScalarResolveError(ScalarError):
-    pass
+    """Raised for errors resolving scalars (unlikely to occur in practice)."""
 
 
 class ScalarParseError(ScalarError):
-    pass
+    """Raised when a scalar couldn't be parsed from a string."""
 
 
 @unique
@@ -37,8 +37,6 @@ class Unit(Enum):
     AUTO = 8
 
 
-UNIT_EXCLUDES_BORDER = {Unit.CELLS, Unit.FRACTION, Unit.VIEW_WIDTH, Unit.VIEW_HEIGHT}
-
 UNIT_SYMBOL = {
     Unit.CELLS: "",
     Unit.FRACTION: "fr",
@@ -52,6 +50,7 @@ UNIT_SYMBOL = {
 SYMBOL_UNIT = {v: k for k, v in UNIT_SYMBOL.items()}
 
 _MATCH_SCALAR = re.compile(r"^(-?\d+\.?\d*)(fr|%|w|h|vw|vh)?$").match
+_FRACTION_ONE = Fraction(1)
 
 
 def _resolve_cells(
@@ -207,10 +206,6 @@ class Scalar(NamedTuple):
         return self.unit == Unit.FRACTION
 
     @property
-    def excludes_border(self) -> bool:
-        return self.unit in UNIT_EXCLUDES_BORDER
-
-    @property
     def cells(self) -> int | None:
         """Check if the unit is explicit cells."""
         value, unit, _ = self
@@ -245,8 +240,9 @@ class Scalar(NamedTuple):
         return cls(float(value), Unit.CELLS, Unit.WIDTH)
 
     @classmethod
+    @lru_cache(maxsize=1024)
     def parse(cls, token: str, percent_unit: Unit = Unit.WIDTH) -> Scalar:
-        """Parse a string in to a Scalar
+        """Parse a string into a Scalar
 
         Args:
             token: A string containing a scalar, e.g. "3.14fr"
@@ -271,7 +267,7 @@ class Scalar(NamedTuple):
     def resolve(
         self, size: Size, viewport: Size, fraction_unit: Fraction | None = None
     ) -> Fraction:
-        """Resolve scalar with units in to a dimensions.
+        """Resolve scalar with units into a dimensions.
 
         Args:
             size: Size of the container.
@@ -289,7 +285,7 @@ class Scalar(NamedTuple):
             unit = percent_unit
         try:
             dimension = RESOLVE_MAP[unit](
-                value, size, viewport, fraction_unit or Fraction(1)
+                value, size, viewport, fraction_unit or _FRACTION_ONE
             )
         except KeyError:
             raise ScalarResolveError(f"expected dimensions; found {str(self)!r}")
@@ -352,7 +348,7 @@ class ScalarOffset(NamedTuple):
         yield None, str(self.y)
 
     def resolve(self, size: Size, viewport: Size) -> Offset:
-        """Resolve the offset in to cells.
+        """Resolve the offset into cells.
 
         Args:
             size: Size of container.

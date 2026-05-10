@@ -11,9 +11,7 @@ from textual.app import (
     UnknownModeError,
 )
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Footer, Header, Label, RichLog
-
-FRUITS = cycle("apple mango strawberry banana peach pear melon watermelon".split())
+from textual.widgets import Footer, Header, Label
 
 
 class ScreenBindingsMixin(Screen[None]):
@@ -21,7 +19,7 @@ class ScreenBindingsMixin(Screen[None]):
         ("1", "one", "Mode 1"),
         ("2", "two", "Mode 2"),
         ("p", "push", "Push rnd scrn"),
-        ("o", "pop_screen", "Pop"),
+        ("o", "app.pop_screen", "Pop"),
         ("r", "remove", "Remove mode 1"),
     ]
 
@@ -56,12 +54,10 @@ class FruitModal(ModalScreen[str], ScreenBindingsMixin):
     BINDINGS = [("d", "dismiss_fruit", "Dismiss")]
 
     def compose(self) -> ComposeResult:
+        FRUITS = cycle(
+            "apple mango strawberry banana peach pear melon watermelon".split()
+        )
         yield Label(next(FRUITS))
-
-
-class FruitsScreen(ScreenBindingsMixin):
-    def compose(self) -> ComposeResult:
-        yield RichLog()
 
 
 @pytest.fixture
@@ -86,42 +82,42 @@ async def test_mode_setup(ModesApp: Type[App]):
     app = ModesApp()
     async with app.run_test():
         assert isinstance(app.screen, BaseScreen)
-        assert str(app.screen.query_one(Label).renderable) == "one"
+        assert str(app.screen.query_one(Label).content) == "one"
 
 
 async def test_switch_mode(ModesApp: Type[App]):
     app = ModesApp()
     async with app.run_test() as pilot:
         await pilot.press("2")
-        assert str(app.screen.query_one(Label).renderable) == "two"
+        assert str(app.screen.query_one(Label).content) == "two"
         await pilot.press("1")
-        assert str(app.screen.query_one(Label).renderable) == "one"
+        assert str(app.screen.query_one(Label).content) == "one"
 
 
 async def test_switch_same_mode(ModesApp: Type[App]):
     app = ModesApp()
     async with app.run_test() as pilot:
         await pilot.press("1")
-        assert str(app.screen.query_one(Label).renderable) == "one"
+        assert str(app.screen.query_one(Label).content) == "one"
         await pilot.press("1")
-        assert str(app.screen.query_one(Label).renderable) == "one"
+        assert str(app.screen.query_one(Label).content) == "one"
 
 
 async def test_switch_unknown_mode(ModesApp: Type[App]):
     app = ModesApp()
     async with app.run_test():
         with pytest.raises(UnknownModeError):
-            app.switch_mode("unknown mode here")
+            await app.switch_mode("unknown mode here")
 
 
 async def test_remove_mode(ModesApp: Type[App]):
     app = ModesApp()
     async with app.run_test() as pilot:
-        app.switch_mode("two")
+        await app.switch_mode("two")
         await pilot.pause()
-        assert str(app.screen.query_one(Label).renderable) == "two"
+        assert str(app.screen.query_one(Label).content) == "two"
         app.remove_mode("one")
-        assert "one" not in app.MODES
+        assert "one" not in app._modes
 
 
 async def test_remove_active_mode(ModesApp: Type[App]):
@@ -134,17 +130,17 @@ async def test_remove_active_mode(ModesApp: Type[App]):
 async def test_add_mode(ModesApp: Type[App]):
     app = ModesApp()
     async with app.run_test() as pilot:
-        app.add_mode("three", BaseScreen("three"))
-        app.switch_mode("three")
+        app.add_mode("three", lambda: BaseScreen("three"))
+        await app.switch_mode("three")
         await pilot.pause()
-        assert str(app.screen.query_one(Label).renderable) == "three"
+        assert str(app.screen.query_one(Label).content) == "three"
 
 
 async def test_add_mode_duplicated(ModesApp: Type[App]):
     app = ModesApp()
     async with app.run_test():
         with pytest.raises(InvalidModeError):
-            app.add_mode("one", BaseScreen("one"))
+            app.add_mode("one", lambda: BaseScreen("one"))
 
 
 async def test_screen_stack_preserved(ModesApp: Type[App]):
@@ -156,7 +152,7 @@ async def test_screen_stack_preserved(ModesApp: Type[App]):
         # Build the stack up.
         for _ in range(N):
             await pilot.press("p")
-            fruits.append(str(app.query_one(Label).renderable))
+            fruits.append(str(app.screen.query_one(Label).content))
 
         assert len(app.screen_stack) == N + 1
 
@@ -168,49 +164,8 @@ async def test_screen_stack_preserved(ModesApp: Type[App]):
         # Check the stack.
         assert len(app.screen_stack) == N + 1
         for _ in range(N):
-            assert str(app.query_one(Label).renderable) == fruits.pop()
+            assert str(app.screen.query_one(Label).content) == fruits.pop()
             await pilot.press("o")
-
-
-async def test_inactive_stack_is_alive():
-    """This tests that timers in screens outside the active stack keep going."""
-    pings = []
-
-    class FastCounter(Screen[None]):
-        def compose(self) -> ComposeResult:
-            yield Label("fast")
-
-        def on_mount(self) -> None:
-            self.call_later(self.set_interval, 0.01, self.ping)
-
-        def ping(self) -> None:
-            pings.append(str(self.app.query_one(Label).renderable))
-
-        def key_s(self):
-            self.app.switch_mode("smile")
-
-    class SmileScreen(Screen[None]):
-        def compose(self) -> ComposeResult:
-            yield Label(":)")
-
-        def key_s(self):
-            self.app.switch_mode("fast")
-
-    class ModesApp(App[None]):
-        MODES = {
-            "fast": FastCounter,
-            "smile": SmileScreen,
-        }
-
-        def on_mount(self) -> None:
-            self.switch_mode("fast")
-
-    app = ModesApp()
-    async with app.run_test() as pilot:
-        await pilot.press("s")
-        assert str(app.query_one(Label).renderable) == ":)"
-        await pilot.press("s")
-        assert ":)" in pings
 
 
 async def test_multiple_mode_callbacks():

@@ -1,5 +1,21 @@
 """Make non-widget Tree support classes available."""
 
-from ._tree import TreeNode
+from textual.widgets._tree import (
+    AddNodeError,
+    EventTreeDataType,
+    NodeID,
+    RemoveRootError,
+    TreeDataType,
+    TreeNode,
+    UnknownNodeID,
+)
 
-__all__ = ["TreeNode"]
+__all__ = [
+    "AddNodeError",
+    "EventTreeDataType",
+    "NodeID",
+    "RemoveRootError",
+    "TreeDataType",
+    "TreeNode",
+    "UnknownNodeID",
+]

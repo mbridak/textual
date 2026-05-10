@@ -4,18 +4,18 @@ import re
 from typing import TYPE_CHECKING, Iterable, Optional, Sequence
 
 from rich.cells import cell_len
-from rich.highlighter import ReprHighlighter
-from rich.segment import Segment
+from rich.highlighter import Highlighter, ReprHighlighter
 from rich.style import Style
 from rich.text import Text
 
-from .. import work
-from .._cache import LRUCache
-from .._line_split import line_split
-from ..geometry import Size
-from ..reactive import var
-from ..scroll_view import ScrollView
-from ..strip import Strip
+from textual import work
+from textual._line_split import line_split
+from textual.cache import LRUCache
+from textual.geometry import Size
+from textual.reactive import var
+from textual.scroll_view import ScrollView
+from textual.selection import Selection
+from textual.strip import Strip
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -26,11 +26,15 @@ _sub_escape = re.compile("[\u0000-\u0014]").sub
 class Log(ScrollView, can_focus=True):
     """A widget to log text."""
 
+    ALLOW_SELECT = True
     DEFAULT_CSS = """
     Log {
         background: $surface;
         color: $text;
         overflow: scroll;
+        &:focus {
+            background-tint: $foreground 5%;
+        }
     }
     """
 
@@ -61,6 +65,7 @@ class Log(ScrollView, can_focus=True):
             classes: The CSS classes of the text log.
             disabled: Whether the text log is disabled or not.
         """
+        super().__init__(name=name, id=id, classes=classes, disabled=disabled)
         self.highlight = highlight
         """Enable highlighting."""
         self.max_lines = max_lines
@@ -69,13 +74,17 @@ class Log(ScrollView, can_focus=True):
         self._width = 0
         self._updates = 0
         self._render_line_cache: LRUCache[int, Strip] = LRUCache(1024)
-        self.highlighter = ReprHighlighter()
+        self.highlighter: Highlighter = ReprHighlighter()
         """The Rich Highlighter object to use, if `highlight=True`"""
-        super().__init__(name=name, id=id, classes=classes, disabled=disabled)
+        self._clear_y = 0
+
+    @property
+    def allow_select(self) -> bool:
+        return True
 
     @property
     def lines(self) -> Sequence[str]:
-        """The raw lines in the TextLog.
+        """The raw lines in the Log.
 
         Note that this attribute is read only.
         Changing the lines will not update the Log's contents.
@@ -85,6 +94,7 @@ class Log(ScrollView, can_focus=True):
 
     def notify_style_update(self) -> None:
         """Called by Textual when styles update."""
+        super().notify_style_update()
         self._render_line_cache.clear()
 
     def _update_maximum_width(self, updates: int, size: int) -> None:
@@ -163,7 +173,7 @@ class Log(ScrollView, can_focus=True):
         Returns:
             The `Log` instance.
         """
-
+        is_vertical_scroll_end = self.is_vertical_scroll_end
         if data:
             if not self._lines:
                 self._lines.append("")
@@ -181,20 +191,25 @@ class Log(ScrollView, can_focus=True):
             self._prune_max_lines()
 
         auto_scroll = self.auto_scroll if scroll_end is None else scroll_end
-        if auto_scroll and not self.is_vertical_scrollbar_grabbed:
-            self.scroll_end(animate=False)
+        if auto_scroll:
+            self.scroll_end(animate=False, immediate=True, x_axis=False)
         return self
 
-    def write_line(self, line: str) -> Self:
+    def write_line(
+        self,
+        line: str,
+        scroll_end: bool | None = None,
+    ) -> Self:
         """Write content on a new line.
 
         Args:
             line: String to write to the log.
+            scroll_end: Scroll to the end after writing, or `None` to use `self.auto_scroll`.
 
         Returns:
             The `Log` instance.
         """
-        self.write_lines([line])
+        self.write_lines([line], scroll_end)
         return self
 
     def write_lines(
@@ -211,6 +226,7 @@ class Log(ScrollView, can_focus=True):
         Returns:
             The `Log` instance.
         """
+        is_vertical_scroll_end = self.is_vertical_scroll_end
         auto_scroll = self.auto_scroll if scroll_end is None else scroll_end
         new_lines = []
         for line in lines:
@@ -222,8 +238,12 @@ class Log(ScrollView, can_focus=True):
         self.virtual_size = Size(self._width, len(self._lines))
         self._update_size(self._updates, new_lines)
         self.refresh_lines(start_line, len(new_lines))
-        if auto_scroll and not self.is_vertical_scrollbar_grabbed:
-            self.scroll_end(animate=False)
+        if (
+            auto_scroll
+            and not self.is_vertical_scrollbar_grabbed
+            and is_vertical_scroll_end
+        ):
+            self.scroll_end(animate=False, immediate=True, x_axis=False)
         else:
             self.refresh()
         return self
@@ -239,7 +259,24 @@ class Log(ScrollView, can_focus=True):
         self._render_line_cache.clear()
         self._updates += 1
         self.virtual_size = Size(0, 0)
+        self._clear_y = 0
         return self
+
+    def get_selection(self, selection: Selection) -> tuple[str, str] | None:
+        """Get the text under the selection.
+
+        Args:
+            selection: Selection information.
+
+        Returns:
+            Tuple of extracted text and ending (typically "\n" or " "), or `None` if no text could be extracted.
+        """
+        text = "\n".join(self._lines)
+        return selection.extract(text), "\n"
+
+    def selection_updated(self, selection: Selection | None) -> None:
+        self._render_line_cache.clear()
+        self.refresh()
 
     def render_line(self, y: int) -> Strip:
         """Render a line of content.
@@ -255,7 +292,7 @@ class Log(ScrollView, can_focus=True):
         return strip
 
     def _render_line(self, y: int, scroll_x: int, width: int) -> Strip:
-        """Render a line in to a cropped strip.
+        """Render a line into a cropped strip.
 
         Args:
             y: Y offset of line.
@@ -272,10 +309,11 @@ class Log(ScrollView, can_focus=True):
         line = self._render_line_strip(y, rich_style)
         assert line._cell_length is not None
         line = line.crop_extend(scroll_x, scroll_x + width, rich_style)
+        line = line.apply_offsets(scroll_x, y)
         return line
 
     def _render_line_strip(self, y: int, rich_style: Style) -> Strip:
-        """Render a line in to a Strip.
+        """Render a line into a Strip.
 
         Args:
             y: Y offset of line.
@@ -284,17 +322,32 @@ class Log(ScrollView, can_focus=True):
         Returns:
             An uncropped Strip.
         """
-        if y in self._render_line_cache:
+        selection = self.text_selection
+        if y in self._render_line_cache and selection is None:
             return self._render_line_cache[y]
 
         _line = self._process_line(self._lines[y])
 
+        line_text = Text(_line, no_wrap=True)
+        line_text.stylize(rich_style)
+
         if self.highlight:
-            line_text = self.highlighter(Text(_line, style=rich_style, no_wrap=True))
-            line = Strip(line_text.render(self.app.console), cell_len(_line))
-        else:
-            line = Strip([Segment(_line, rich_style)], cell_len(_line))
-        self._render_line_cache[y] = line
+            line_text = self.highlighter(line_text)
+        if selection is not None:
+            if (select_span := selection.get_span(y - self._clear_y)) is not None:
+                start, end = select_span
+                if end == -1:
+                    end = len(line_text)
+
+                selection_style = self.screen.get_component_rich_style(
+                    "screen--selection"
+                )
+                line_text.stylize(selection_style, start, end)
+
+        line = Strip(line_text.render(self.app.console), cell_len(_line))
+
+        if selection is not None:
+            self._render_line_cache[y] = line
         return line
 
     def refresh_lines(self, y_start: int, line_count: int = 1) -> None:

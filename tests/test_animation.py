@@ -51,8 +51,8 @@ async def test_scheduling_animation() -> None:
 
         styles.animate("background", "white", delay=delay, duration=0)
 
-        await pilot.pause(0.9 * delay)
-        assert styles.background.rgb == (0, 0, 0)  # Still black
+        # Still black immediately after call, animation hasn't started yet due to `delay`
+        assert styles.background.rgb == (0, 0, 0)
 
         await pilot.wait_for_scheduled_animations()
         assert styles.background.rgb == (255, 255, 255)
@@ -153,8 +153,8 @@ async def test_schedule_reverse_animations() -> None:
         assert styles.background.rgb == (0, 0, 0)
 
         # Now, the actual test is to make sure we go back to black if scheduling both at once.
-        styles.animate("background", "white", delay=0.05, duration=0.01)
-        await pilot.pause()
+        styles.animate("background", "white", delay=0.025, duration=0.05)
+        # While the black -> white animation runs, start the white -> black animation.
         styles.animate("background", "black", delay=0.05, duration=0.01)
         await pilot.wait_for_scheduled_animations()
         assert styles.background.rgb == (0, 0, 0)
@@ -211,3 +211,91 @@ async def test_cancel_widget_non_animation() -> None:
         assert not pilot.app.animator.is_being_animated(widget, "counter")
         await widget.stop_animation("counter")
         assert not pilot.app.animator.is_being_animated(widget, "counter")
+
+
+async def test_double_animation_same_value_on_complete() -> None:
+    """Test that animating an attribute a second time to the same value, fires its `on_complete` callback."""
+
+    completed: list[str] = []
+
+    class AnimApp(App):
+        x = var(0)
+
+        async def animate_a(self) -> None:
+
+            def on_complete() -> None:
+                completed.append("a")
+
+            self.animator.animate(
+                self,
+                "x",
+                100,
+                duration=0.1,
+                on_complete=on_complete,
+            )
+
+        async def animate_b(self) -> None:
+
+            def on_complete() -> None:
+                completed.append("b")
+
+            self.animator.animate(
+                self,
+                "x",
+                100,
+                duration=0.1,
+                on_complete=on_complete,
+            )
+
+    app = AnimApp()
+    async with app.run_test() as pilot:
+        await app.animate_a()
+        assert app.x != 100
+        await app.animate_b()
+        await pilot.wait_for_animation()
+        assert completed == ["a", "b"]
+        assert app.x == 100
+
+
+async def test_double_animation_different_value_on_complete() -> None:
+    """Test that animating an attribute a second time to a different value, fires its `on_complete` callback."""
+
+    completed: list[str] = []
+
+    class AnimApp(App):
+        x = var(0)
+
+        async def animate_a(self) -> None:
+
+            def on_complete() -> None:
+                completed.append("a")
+
+            self.animator.animate(
+                self,
+                "x",
+                100,
+                duration=0.1,
+                on_complete=on_complete,
+            )
+
+        async def animate_b(self) -> None:
+
+            def on_complete() -> None:
+                completed.append("b")
+
+            self.animator.animate(
+                self,
+                "x",
+                101,
+                duration=0.1,
+                on_complete=on_complete,
+            )
+
+    app = AnimApp()
+    async with app.run_test() as pilot:
+        await app.animate_a()
+        assert app.x != 101
+        await app.animate_b()  # animate to different value
+        await pilot.wait_for_animation()
+        assert completed == ["a", "b"]
+        assert app.x == 101

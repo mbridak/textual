@@ -1,22 +1,29 @@
 """
-`ScrollView` is a base class for [line api](/guide/widgets#line-api) widgets.
+`ScrollView` is a base class for [Line API](/guide/widgets#line-api) widgets.
 """
 
 from __future__ import annotations
 
 from rich.console import RenderableType
 
-from ._animator import EasingFunction
-from ._types import CallbackType
-from .containers import ScrollableContainer
-from .geometry import Region, Size
+from textual._animator import EasingFunction
+from textual._types import AnimationLevel, CallbackType
+from textual.containers import ScrollableContainer
+from textual.geometry import Region, Size
 
 
 class ScrollView(ScrollableContainer):
     """
     A base class for a Widget that handles its own scrolling (i.e. doesn't rely
     on the compositor to render children).
+
+    !!! note
+
+        This is the typically wrong class for making something scrollable. If you want to make something scroll, set its
+        `overflow` style to auto or scroll. Or use one of the pre-defined scrolling containers such as [VerticalScroll][textual.containers.VerticalScroll].
     """
+
+    ALLOW_MAXIMIZE = True
 
     DEFAULT_CSS = """
     ScrollView {
@@ -30,15 +37,23 @@ class ScrollView(ScrollableContainer):
         """Always scrollable."""
         return True
 
+    @property
+    def is_container(self) -> bool:
+        """Since a ScrollView should be a line-api widget, it won't have children,
+        and therefore isn't a container."""
+        return False
+
     def watch_scroll_x(self, old_value: float, new_value: float) -> None:
-        if self.show_horizontal_scrollbar and round(old_value) != round(new_value):
-            self.horizontal_scrollbar.position = round(new_value)
-            self.refresh()
+        if self.show_horizontal_scrollbar:
+            self.horizontal_scrollbar.position = new_value
+        if round(old_value) != round(new_value):
+            self.refresh(self.size.region)
 
     def watch_scroll_y(self, old_value: float, new_value: float) -> None:
-        if self.show_vertical_scrollbar and round(old_value) != round(new_value):
-            self.vertical_scrollbar.position = round(new_value)
-            self.refresh()
+        if self.show_vertical_scrollbar:
+            self.vertical_scrollbar.position = new_value
+        if round(old_value) != round(new_value):
+            self.refresh(self.size.region)
 
     def on_mount(self):
         self._refresh_scrollbars()
@@ -80,22 +95,22 @@ class ScrollView(ScrollableContainer):
             layout: Perform layout if required.
 
         Returns:
-            True if anything changed, or False if nothing changed.
+            True if a resize event should be sent, otherwise False.
         """
-        if self._size != size or self._container_size != container_size:
-            self.refresh()
+        if size_changed := self._size != size:
+            self._set_dirty()
         if (
-            self._size != size
+            size_changed
             or virtual_size != self.virtual_size
             or container_size != self.container_size
         ):
+            self._scrollbar_changes.clear()
             self._size = size
             virtual_size = self.virtual_size
             self._container_size = size - self.styles.gutter.totals
             self._scroll_update(virtual_size)
-            return True
-        else:
-            return False
+
+        return size_changed or self._container_size != container_size
 
     def render(self) -> RenderableType:
         """Render the scrollable region (if `render_lines` is not implemented).
@@ -119,6 +134,8 @@ class ScrollView(ScrollableContainer):
         easing: EasingFunction | str | None = None,
         force: bool = False,
         on_complete: CallbackType | None = None,
+        level: AnimationLevel = "basic",
+        immediate: bool = False,
     ) -> None:
         """Scroll to a given (absolute) coordinate, optionally animating.
 
@@ -131,6 +148,9 @@ class ScrollView(ScrollableContainer):
             easing: An easing method for the scrolling animation.
             force: Force scrolling even when prohibited by overflow styling.
             on_complete: A callable to invoke when the animation is finished.
+            level: Minimum level required for the animation to take place (inclusive).
+            immediate: If `False` the scroll will be deferred until after a screen refresh,
+                set to `True` to scroll immediately.
         """
 
         self._scroll_to(
@@ -142,6 +162,22 @@ class ScrollView(ScrollableContainer):
             easing=easing,
             force=force,
             on_complete=on_complete,
+            level=level,
+        )
+
+    def refresh_line(self, y: int) -> None:
+        """Refresh a single line.
+
+        Args:
+            y: Coordinate of line.
+        """
+        self.refresh(
+            Region(
+                0,
+                y - self.scroll_offset.y,
+                max(self.virtual_size.width, self.size.width),
+                1,
+            )
         )
 
     def refresh_lines(self, y_start: int, line_count: int = 1) -> None:
@@ -151,8 +187,10 @@ class ScrollView(ScrollableContainer):
             y_start: First line to refresh.
             line_count: Total number of lines to refresh.
         """
-
-        width = self.size.width
-        scroll_x, scroll_y = self.scroll_offset
-        refresh_region = Region(scroll_x, y_start - scroll_y, width, line_count)
+        refresh_region = Region(
+            0,
+            y_start - self.scroll_offset.y,
+            max(self.virtual_size.width, self.size.width),
+            line_count,
+        )
         self.refresh(refresh_region)

@@ -1,6 +1,4 @@
-"""Make non-widget DataTable support classes available."""
-
-from ._data_table import (
+from textual.widgets._data_table import (
     CellDoesNotExist,
     CellKey,
     CellType,
@@ -12,6 +10,7 @@ from ._data_table import (
     Row,
     RowDoesNotExist,
     RowKey,
+    StringKey,
 )
 
 __all__ = [
@@ -26,4 +25,5 @@ __all__ = [
     "Row",
     "RowDoesNotExist",
     "RowKey",
+    "StringKey",
 ]

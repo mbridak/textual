@@ -1,1 +1,6 @@
-::: textual.Logger
+---
+title: "textual"
+---
+
+
+::: textual

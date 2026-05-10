@@ -1,0 +1,589 @@
+from __future__ import annotations
+
+import pytest
+from rich.text import Text
+
+from textual.color import Color
+from textual.content import Content, Span
+from textual.style import Style
+from textual.visual import RenderOptions
+from textual.widget import Widget
+
+
+def test_blank():
+    """Check blank content."""
+    blank = Content("")
+    assert isinstance(blank, Content)
+    assert str(blank) == ""
+    assert blank.plain == ""
+    assert not blank
+    assert blank.markup == ""
+    assert len(blank) == 0
+    assert blank.spans == []
+
+
+def test_simple():
+    """Check content with simple unstyled text."""
+    simple = Content("foo")
+    assert isinstance(simple, Content)
+    assert str(simple) == "foo"
+    assert simple.plain == "foo"
+    assert simple  # Not empty is truthy
+    assert simple.markup == "foo"
+    assert len(simple) == 3
+    assert simple.spans == []
+
+
+def test_constructor():
+    content = Content("Hello, World")
+    assert content
+    assert len(content) == 12
+    assert content.cell_length == 12
+    assert content.plain == "Hello, World"
+    repr(content)
+
+
+def test_bool():
+    assert bool(Content("foo")) is True
+    assert bool(Content("")) is False
+
+
+def test_from_rich_text():
+    text = Text.from_markup("[red]Hello[/red] [blue]World[/blue]")
+    content = Content.from_rich_text(text)
+    assert len(content) == 11
+    assert content.plain == "Hello World"
+    print(content.spans)
+    assert content.spans == [
+        Span(0, 5, style=Style(foreground=Color(0, 0, 0, ansi=1))),
+        Span(6, 11, style=Style(foreground=Color(0, 0, 0, ansi=4))),
+    ]
+
+
+def test_styled():
+    text = Content.styled("Hello", "red")
+    assert text.plain == "Hello"
+    assert len(text) == 5
+    assert text.cell_length == 5
+    assert text._spans == [Span(0, 5, "red")]
+
+
+def test_getitem():
+    content = Content("Hello, world").stylize("blue", 0, 5)
+    assert content[0].plain == "H"
+    assert content[0]._spans == [Span(0, 1, "blue")]
+    assert content[-1].plain == "d"
+    assert content[-1]._spans == []
+    assert content[:2].plain == "He"
+    assert content[:2]._spans == [Span(0, 2, "blue")]
+
+
+def test_cell_length():
+    assert Content("").cell_length == 0
+    assert Content("foo").cell_length == 3
+    assert Content("💩").cell_length == 2
+
+
+def test_stylize() -> None:
+    """Test the stylize method."""
+    foo = Content("foo bar")
+    assert foo.spans == []
+    red_foo = foo.stylize("red")
+    # stylize create a new object
+    assert foo.spans == []
+    # With no parameters, full string is stylized
+    assert red_foo.spans == [Span(0, 7, "red")]
+    red_foo = red_foo.stylize("blue", 4, 7)
+    # Another span is appended
+    assert red_foo.spans == [
+        Span(0, 7, "red"),
+        Span(4, 7, "blue"),
+    ]
+
+
+def test_stylize_before() -> None:
+    """Test the stylize_before method."""
+    foo = Content("foo bar")
+    assert foo.spans == []
+    red_foo = foo.stylize("red")
+    # stylize create a new object
+    assert foo.spans == []
+    # With no parameters, full string is stylized
+    assert red_foo.spans == [Span(0, 7, "red")]
+    red_foo = red_foo.stylize_before("blue", 4, 7)
+    # Another span is appended
+    assert red_foo.spans == [
+        Span(4, 7, "blue"),
+        Span(0, 7, "red"),
+    ]
+
+
+def test_eq() -> None:
+    """Test equality."""
+    assert Content("foo") == Content("foo")
+    assert Content("foo") == "foo"
+    assert Content("foo") != Content("bar")
+    assert Content("foo") != "bar"
+
+
+def test_add() -> None:
+    """Test addition."""
+    # Simple cases
+    assert Content("") + Content("") == Content("")
+    assert Content("foo") + Content("") == Content("foo")
+    # Works with simple strings
+    assert Content("foo") + "" == Content("foo")
+    assert "" + Content("foo") == Content("foo")
+
+    # Test spans after addition
+    content = Content.styled("foo", "red") + " " + Content.styled("bar", "blue")
+    assert str(content) == "foo bar"
+    assert content.spans == [Span(0, 3, "red"), Span(4, 7, "blue")]
+    assert content.cell_length == 7
+
+
+def test_radd() -> None:
+    """Test reverse addition."""
+    assert "foo" + Content("bar") == Content("foobar")
+
+    # Test spans after addition
+    content = "foo " + Content.styled("bar", "blue")
+    assert str(content) == "foo bar"
+    assert content.spans == [Span(4, 7, "blue")]
+
+
+def test_from_markup():
+    """Test simple parsing of content markup."""
+    content = Content.from_markup("[red]Hello[/red] [blue]World[/blue]")
+    assert len(content) == 11
+    assert content.plain == "Hello World"
+    assert content.spans == [
+        Span(start=0, end=5, style="red"),
+        Span(start=6, end=11, style="blue"),
+    ]
+
+
+def test_markup():
+    """Test markup round trip"""
+    content = Content.from_markup("[red]Hello[/red] [blue]World[/blue]")
+    assert content.plain == "Hello World"
+    assert content.markup == "[red]Hello[/red] [blue]World[/blue]"
+
+
+def test_join():
+    """Test the join method."""
+
+    # Edge cases
+    assert Content("").join([]) == ""
+    assert Content(".").join([]) == ""
+    assert Content("").join(["foo"]) == "foo"
+    assert Content(".").join(["foo"]) == "foo"
+
+    # Join strings and Content
+    pieces = [Content.styled("foo", "red"), "bar", Content.styled("baz", "blue")]
+    content = Content(".").join(pieces)
+    assert content.plain == "foo.bar.baz"
+    assert content.spans == [Span(0, 3, "red"), Span(8, 11, "blue")]
+
+
+def test_sort():
+    """Test content may be sorted."""
+    # functools.total_ordering doing most of the heavy lifting here.
+    contents = sorted([Content("foo"), Content("bar"), Content("baz")])
+    assert contents[0].plain == "bar"
+    assert contents[1].plain == "baz"
+    assert contents[2].plain == "foo"
+
+
+def test_truncate():
+    """Test truncated method."""
+    content = Content.from_markup("[red]Hello World[/red]")
+    # Edge case of 0
+    assert content.truncate(0).markup == ""
+    # Edge case of 0 wil ellipsis
+    assert content.truncate(0, ellipsis=True).markup == ""
+    # Edge case of 1
+    assert content.truncate(1, ellipsis=True).markup == "[red]…[/red]"
+    # Truncate smaller
+    assert content.truncate(3).markup == "[red]Hel[/red]"
+    # Truncate to same size
+    assert content.truncate(11).markup == "[red]Hello World[/red]"
+    # Truncate smaller will ellipsis
+    assert content.truncate(5, ellipsis=True).markup == "[red]Hell…[/red]"
+    # Truncate larger results unchanged
+    assert content.truncate(15).markup == "[red]Hello World[/red]"
+    # Truncate larger with padding increases size
+    assert content.truncate(15, pad=True).markup == "[red]Hello World[/red]    "
+
+
+def test_assemble():
+    """Test Content.assemble constructor."""
+    content = Content.assemble(
+        "Assemble: ",  # Simple text
+        Content.from_markup(
+            "pieces of [red]text[/red] or [blue]content[/blue] into "
+        ),  # Other Content
+        ("a single Content instance", "underline"),  # A tuple of text and a style
+    )
+    assert (
+        content.plain
+        == "Assemble: pieces of text or content into a single Content instance"
+    )
+    print(content.spans)
+    assert content.spans == [
+        Span(20, 24, style="red"),
+        Span(28, 35, style="blue"),
+        Span(41, 66, style="underline"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "markup,plain",
+    [
+        ("\\[", "["),
+        ("\\[foo", "[foo"),
+        ("\\[foo]", "[foo]"),
+        ("\\[/foo", "[/foo"),
+        ("\\[/foo]", "[/foo]"),
+        ("\\[]", "[]"),
+        ("\\[0]", "[0]"),
+    ],
+)
+def test_escape(markup: str, plain: str) -> None:
+    """Test that escaping the first square bracket."""
+    content = Content.from_markup(markup)
+    assert content.plain == plain
+    assert content.spans == []
+
+
+def test_strip_control_codes():
+    """Test that control codes are removed from content."""
+    assert Content("foo\r\nbar").plain == "foo\nbar"
+    assert Content.from_markup("foo\r\nbar").plain == "foo\nbar"
+
+
+def test_content_from_text():
+    # Check markup
+    content1 = Content.from_text("[bold]Hello World")
+    assert isinstance(content1, Content)
+    assert content1.plain == "Hello World"
+    assert content1.spans == [Span(0, 11, "bold")]
+
+    # Check Content is unaltered
+    content2 = Content.from_text(content1)
+    assert content1 is content2
+
+    # Check Text instance is converted to Content
+    content3 = Content.from_text(Text.from_markup("[bold]Hello World"))
+    assert isinstance(content3, Content)
+    assert content3.plain == "Hello World"
+    assert content3.spans == [Span(0, 11, Style(bold=True))]
+
+    # Check markup disabled
+    content4 = Content.from_text("[bold]Hello World", markup=False)
+    assert isinstance(content4, Content)
+    assert content4.plain == "[bold]Hello World"
+    assert content4.spans == []
+
+
+def test_first_line():
+    content = Content("foo\nbar").stylize("red")
+    first_line = content.first_line
+    assert first_line.plain == "foo"
+    assert first_line.spans == [Span(0, 3, "red")]
+
+
+async def test_split_and_tabs():
+    spans = [
+        Span(0, 49, style="$text"),
+    ]
+
+    content = Content("--- hello.py\t2024-01-15 10:30:00.000000000 -0800", spans=spans)
+    widget = Widget()
+    content.render_strips(0, None, Style(), RenderOptions(widget._get_style, {}))
+
+
+def test_simplify():
+    """Test simplify joins spans."""
+    content = Content.from_markup("[bold]Foo[/][bold]Bar[/]")
+    assert content.spans == [Span(0, 3, "bold"), Span(3, 6, "bold")]
+    content.simplify()
+    assert content.spans == [Span(0, 6, "bold")]
+
+
+@pytest.mark.parametrize(
+    ["input", "tab_width", "expected"],
+    [
+        (Content(""), 8, Content("")),
+        (Content("H"), 8, Content("H")),
+        (Content("Hello"), 8, Content("Hello")),
+        (Content("\t"), 8, Content(" " * 8)),
+        (Content("A\t"), 8, Content("A" + " " * 7)),
+        (Content("ABCD\t"), 8, Content("ABCD" + " " * 4)),
+        (Content("ABCDEFG\t"), 8, Content("ABCDEFG ")),
+        (Content("ABCDEFGH\t"), 8, Content("ABCDEFGH" + " " * 8)),
+        (Content("Hel\tlo!"), 4, Content("Hel lo!")),
+        (Content("\t\t"), 4, Content(" " * 8)),
+        (Content("FO\t\t"), 4, Content("FO      ")),
+        (Content("FO\tOB\t"), 4, Content("FO  OB  ")),
+        (
+            Content("FOO", spans=[Span(0, 3, "red")]),
+            4,
+            Content("FOO", spans=[Span(0, 3, "red")]),
+        ),
+        (
+            Content("FOO\tBAR", spans=[Span(0, 3, "red")]),
+            8,
+            Content("FOO     BAR", spans=[Span(0, 3, "red")]),
+        ),
+        (
+            Content("FOO\tBAR", spans=[Span(0, 3, "red"), Span(4, 8, "blue")]),
+            8,
+            Content("FOO     BAR", spans=[Span(0, 3, "red"), Span(8, 11, "blue")]),
+        ),
+        (
+            Content("foo\tbar\nbaz", spans=[Span(0, 11, "red")]),
+            8,
+            Content("foo     bar\nbaz", spans=[Span(0, 15, "red")]),
+        ),
+    ],
+)
+def test_expand_tabs(input: Content, tab_width: int, expected: Content):
+    output = input.expand_tabs(tab_width).simplify()
+    print(repr(output))
+    assert output.plain == expected.plain
+    assert output._spans == expected._spans
+
+
+def test_add_spans() -> None:
+    content = Content.from_markup("[red]Hello[/red], World!")
+    content = content.add_spans([Span(0, 5, "green"), Span(7, 9, "blue")])
+    expected = [
+        Span(0, 5, style="red"),
+        Span(0, 5, style="green"),
+        Span(7, 9, style="blue"),
+    ]
+    assert content.spans == expected
+
+
+def test_wrap() -> None:
+    content = Content.from_markup("[green]Hello, [b]World, One two three[/b]")
+    wrapped = content.wrap(6)
+    print(wrapped)
+    expected = [
+        Content("Hello,", spans=[Span(0, 6, style="green")]),
+        Content("World,", spans=[Span(0, 6, style="green"), Span(0, 6, style="b")]),
+        Content("One", spans=[Span(0, 3, style="green"), Span(0, 3, style="b")]),
+        Content("two", spans=[Span(0, 3, style="green"), Span(0, 3, style="b")]),
+        Content("three", spans=[Span(0, 5, style="green"), Span(0, 5, style="b")]),
+    ]
+    assert len(wrapped) == len(expected)
+    for line1, line2 in zip(wrapped, expected):
+        assert line1.is_same(line2)
+
+
+@pytest.mark.parametrize(
+    "content, width, expected",
+    [
+        (
+            Content("111222333"),
+            3,
+            [
+                Content("111"),
+                Content("222"),
+                Content("333"),
+            ],
+        ),
+        (
+            Content("1112223334"),
+            3,
+            [
+                Content("111"),
+                Content("222"),
+                Content("333"),
+                Content("4"),
+            ],
+        ),
+        (
+            Content(""),
+            10,
+            [Content("")],
+        ),
+        (
+            Content("1"),
+            10,
+            [Content("1")],
+        ),
+        (
+            Content("📦"),
+            10,
+            [Content("📦")],
+        ),
+        (
+            Content("📦"),
+            1,
+            [Content("📦")],
+        ),
+        (
+            Content("Hello"),
+            10,
+            [Content("Hello")],
+        ),
+        (
+            Content("Hello"),
+            5,
+            [Content("Hello")],
+        ),
+        (
+            Content("Hello"),
+            2,
+            [Content("He"), Content("ll"), Content("o")],
+        ),
+        (
+            Content.from_markup("H[b]ell[/]o"),
+            2,
+            [
+                Content.from_markup("H[b]e"),
+                Content.from_markup("[b]ll[/]"),
+                Content("o"),
+            ],
+        ),
+        (
+            Content.from_markup("💩H[b]ell[/]o"),
+            2,
+            [
+                Content("💩"),
+                Content.from_markup("H[b]e"),
+                Content.from_markup("[b]ll[/]"),
+                Content("o"),
+            ],
+        ),
+        (
+            Content.from_markup("💩H[b]ell[/]o"),
+            3,
+            [
+                Content("💩H"),
+                Content.from_markup("[b]ell"),
+                Content.from_markup("o"),
+            ],
+        ),
+        (
+            Content.from_markup("💩H[b]ell[/]o💩"),
+            3,
+            [
+                Content("💩H"),
+                Content.from_markup("[b]ell"),
+                Content.from_markup("o💩"),
+            ],
+        ),
+        (
+            Content.from_markup("💩💩💩"),
+            1,
+            [
+                Content("💩"),
+                Content("💩"),
+                Content("💩"),
+            ],
+        ),
+        (
+            Content.from_markup("💩💩💩"),
+            3,
+            [
+                Content("💩"),
+                Content("💩"),
+                Content("💩"),
+            ],
+        ),
+        (
+            Content.from_markup("💩💩💩"),
+            4,
+            [
+                Content("💩💩"),
+                Content("💩"),
+            ],
+        ),
+        (
+            Content("📦000📦111📦222📦333📦444📦555📦666📦777📦888📦999"),
+            50,
+            [Content("📦000📦111📦222📦333📦444📦555📦666📦777📦888📦999")],
+        ),
+        (
+            Content("📦000📦111📦222📦333📦444📦555📦666📦777📦888📦999"),
+            49,
+            [
+                Content("📦000📦111📦222📦333📦444📦555📦666📦777📦888📦99"),
+                Content("9"),
+            ],
+        ),
+        (
+            Content("📦000📦111📦222📦333📦444📦555📦666📦777📦888📦999"),
+            48,
+            [
+                Content("📦000📦111📦222📦333📦444📦555📦666📦777📦888📦9"),
+                Content("99"),
+            ],
+        ),
+        (
+            Content("📦000📦111📦222📦333📦444📦555📦666📦777📦888📦999"),
+            47,
+            [
+                Content("📦000📦111📦222📦333📦444📦555📦666📦777📦888📦"),
+                Content("999"),
+            ],
+        ),
+        (
+            Content("📦000📦111📦222📦333📦444📦555📦666📦777📦888📦999"),
+            46,
+            [
+                Content("📦000📦111📦222📦333📦444📦555📦666📦777📦888"),
+                Content("📦999"),
+            ],
+        ),
+        (
+            Content("📦000📦111📦222📦333📦444📦555📦666📦777📦888📦999"),
+            45,
+            [
+                Content("📦000📦111📦222📦333📦444📦555📦666📦777📦888"),
+                Content("📦999"),
+            ],
+        ),
+        (
+            Content("📦000📦111📦222📦333📦444📦555📦666📦777📦888📦999"),
+            44,
+            [
+                Content("📦000📦111📦222📦333📦444📦555📦666📦777📦88"),
+                Content("8📦999"),
+            ],
+        ),
+    ],
+)
+def test_fold(content: Content, width: int, expected: list[Content]) -> None:
+    """Test content.fold method works, and correctly handles double width cells.
+
+    Args:
+        content: Test content.
+        width: Desired width.
+        expected: Expectected result.
+    """
+    result = content.fold(width)
+    assert isinstance(result, list)
+    assert len(result) == len(expected)
+    for line, expected_line in zip(result, expected):
+        assert line.is_same(expected_line)
+
+
+@pytest.mark.parametrize(
+    "width,style,text,spans,cell_length",
+    [
+        (5, None, "     ", [], 5),
+        (0, None, "", [], 0),
+        (5, "on red", "     ", [Span(0, 5, "on red")], 5),
+    ],
+)
+def test_blank_method(
+    width: int, style: str | None, text: str, spans: list[Span], cell_length: int
+) -> None:
+    blank = Content.blank(width, style)
+    assert blank.plain == text
+    assert blank.spans == spans
+    assert blank.cell_length == cell_length

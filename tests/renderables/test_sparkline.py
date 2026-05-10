@@ -1,3 +1,8 @@
+from collections import UserList, deque
+from typing import Sequence
+
+import pytest
+
 from tests.utilities.render import render
 from textual.renderables.sparkline import Sparkline
 
@@ -46,3 +51,54 @@ def test_sparkline_color_blend():
         render(Sparkline([1, 2, 3], width=3))
         == f"{GREEN}▁{STOP}{BLENDED}▄{STOP}{RED}█{STOP}"
     )
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        (1, 2, 3),
+        [1, 2, 3],
+        bytearray((1, 2, 3)),
+        bytes((1, 2, 3)),
+        deque([1, 2, 3]),
+        range(1, 4),
+        UserList((1, 2, 3)),
+    ],
+)
+def test_sparkline_sequence_types(data: Sequence[int]):
+    """Sparkline should work with common Sequence types."""
+    assert issubclass(type(data), Sequence)
+    assert (
+        render(Sparkline(data, width=3))
+        == f"{GREEN}▁{STOP}{BLENDED}▄{STOP}{RED}█{STOP}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("height", "expected"),
+    [
+        (1, f"{GREEN}▁{STOP}{BLENDED}▄{STOP}{RED}█{STOP}"),
+        (
+            2,
+            "\n".join(
+                [
+                    f"  {RED}█{STOP}",
+                    f"{GREEN}▁{STOP}{BLENDED}█{STOP}{RED}█{STOP}",
+                ]
+            ),
+        ),
+        (
+            3,
+            "\n".join(
+                [
+                    f"  {RED}█{STOP}",
+                    f" {BLENDED}▄{STOP}{RED}█{STOP}",
+                    f"{GREEN}▁{STOP}{BLENDED}█{STOP}{RED}█{STOP}",
+                ]
+            ),
+        ),
+    ],
+    ids=["height=1", "height=2", "height=3"],
+)
+def test_sparkline_height(height: int, expected: str):
+    assert render(Sparkline([1, 2, 3], width=3, height=height)) == expected

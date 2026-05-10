@@ -5,16 +5,18 @@ from __future__ import annotations
 from typing import ClassVar, Optional
 
 import rich.repr
+from rich.console import RenderableType
 
-from ..binding import Binding, BindingType
-from ..containers import Container
-from ..events import Click, Mount
-from ..message import Message
-from ..reactive import var
-from ._radio_button import RadioButton
+from textual import _widget_navigation
+from textual.binding import Binding, BindingType
+from textual.containers import VerticalScroll
+from textual.events import Click, Mount
+from textual.message import Message
+from textual.reactive import reactive, var
+from textual.widgets._radio_button import RadioButton
 
 
-class RadioSet(Container, can_focus=True, can_focus_children=False):
+class RadioSet(VerticalScroll, can_focus=True, can_focus_children=False):
     """Widget for grouping a collection of radio buttons into a set.
 
     When a collection of [`RadioButton`][textual.widgets.RadioButton]s are
@@ -23,46 +25,70 @@ class RadioSet(Container, can_focus=True, can_focus_children=False):
     turned off.
     """
 
+    ALLOW_SELECT = False
+    ALLOW_MAXIMIZE = True
+
     DEFAULT_CSS = """
     RadioSet {
-        border: tall transparent;
-        background: $boost;
-        padding: 0 1 0 0;
+        border: tall $border-blurred;
+        background: $surface;
+        padding: 0 1;        
         height: auto;
-        width: auto;
-    }
+        width: 1fr;
+        pointer: pointer;
 
-    RadioSet:focus {
-        border: tall $accent;
-    }
+        &.-textual-compact {
+            border: none !important;
+            padding: 0;
+        }
 
-    /* The following rules/styles mimic similar ToggleButton:focus rules in
-     * ToggleButton. If those styles ever get updated, these should be too.
-     */
+        & > RadioButton {
+            background: transparent;
+            border: none;
+            padding: 0;
+            width: 1fr;
 
-    RadioSet > * {
-        background: transparent;
-        border: none;
-        padding: 0 1;
-    }
+            & > .toggle--button {
+                color: $panel-darken-2;
+                background: $panel;
+            }            
+        }
 
-    RadioSet:focus > RadioButton.-selected > .toggle--label {
-        text-style: underline;
-    }
+        & > RadioButton.-on .toggle--button {
+            color: $text-success;
+        }
 
-    RadioSet:focus ToggleButton.-selected > .toggle--button {
-        background: $foreground 25%;
-    }
+        &:blur {
+            & > RadioButton.-selected {
+                & > .toggle--label {
+                    background: $block-cursor-blurred-background;
+                }
+            }
+        }
 
-    RadioSet:focus > RadioButton.-on.-selected > .toggle--button {
-        background: $foreground 25%;
+        &:focus {
+            /* The following rules/styles mimic similar ToggleButton:focus rules in
+            * ToggleButton. If those styles ever get updated, these should be too.
+            */
+            border: tall $border;
+            background-tint: $foreground 5%;
+            & > RadioButton.-selected {
+            
+                & > .toggle--label {
+                    background: $block-cursor-background;                
+                    color: $block-cursor-foreground;                
+                    text-style: $block-cursor-text-style;
+                }                         
+            }
+
+        }
     }
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("down,right", "next_button", "", show=False),
-        Binding("enter,space", "toggle", "Toggle", show=False),
-        Binding("up,left", "previous_button", "", show=False),
+        Binding("down,right", "next_button", "Next option", show=False),
+        Binding("enter,space", "toggle_button", "Toggle", show=False),
+        Binding("up,left", "previous_button", "Previous option", show=False),
     ]
     """
     | Key(s) | Description |
@@ -75,8 +101,11 @@ class RadioSet(Container, can_focus=True, can_focus_children=False):
     _selected: var[int | None] = var[Optional[int]](None)
     """The index of the currently-selected radio button."""
 
+    compact: reactive[bool] = reactive(False, toggle_class="-textual-compact")
+    """Enable compact display?"""
+
     @rich.repr.auto
-    class Changed(Message, bubble=True):
+    class Changed(Message):
         """Posted when the pressed button in the set changes.
 
         This message can be handled using an `on_radio_set_changed` method.
@@ -120,15 +149,19 @@ class RadioSet(Container, can_focus=True, can_focus_children=False):
         id: str | None = None,
         classes: str | None = None,
         disabled: bool = False,
+        tooltip: RenderableType | None = None,
+        compact: bool = False,
     ) -> None:
         """Initialise the radio set.
 
         Args:
-            buttons: A collection of labels or [`RadioButton`][textual.widgets.RadioButton]s to group together.
+            buttons: The labels or [`RadioButton`][textual.widgets.RadioButton]s to group together.
             name: The name of the radio set.
             id: The ID of the radio set in the DOM.
             classes: The CSS classes of the radio set.
             disabled: Whether the radio set is disabled or not.
+            tooltip: Optional tooltip.
+            compact: Enable compact radio set style
 
         Note:
             When a `str` label is provided, a
@@ -147,13 +180,15 @@ class RadioSet(Container, can_focus=True, can_focus_children=False):
             classes=classes,
             disabled=disabled,
         )
+        if tooltip is not None:
+            self.tooltip = tooltip
+        self.compact = compact
 
     def _on_mount(self, _: Mount) -> None:
         """Perform some processing once mounted in the DOM."""
 
-        # If there are radio buttons, select the first one.
-        if self._nodes:
-            self._selected = 0
+        # If there are radio buttons, select the first available one.
+        self.action_next_button()
 
         # Get all the buttons within us; we'll be doing a couple of things
         # with that list.
@@ -183,6 +218,7 @@ class RadioSet(Container, can_focus=True, can_focus_children=False):
         self.query(RadioButton).remove_class("-selected")
         if self._selected is not None:
             self._nodes[self._selected].add_class("-selected")
+            self._scroll_to_selected()
 
     def _on_radio_button_changed(self, event: RadioButton.Changed) -> None:
         """Respond to the value of a button in the set being changed.
@@ -248,28 +284,32 @@ class RadioSet(Container, can_focus=True, can_focus_children=False):
 
         Note that this will wrap around to the end if at the start.
         """
-        if self._nodes:
-            if self._selected == 0:
-                self._selected = len(self.children) - 1
-            elif self._selected is None:
-                self._selected = 0
-            else:
-                self._selected -= 1
+        self._selected = _widget_navigation.find_next_enabled(
+            self.children,
+            anchor=self._selected,
+            direction=-1,
+        )
 
     def action_next_button(self) -> None:
         """Navigate to the next button in the set.
 
         Note that this will wrap around to the start if at the end.
         """
-        if self._nodes:
-            if self._selected is None or self._selected == len(self._nodes) - 1:
-                self._selected = 0
-            else:
-                self._selected += 1
+        self._selected = _widget_navigation.find_next_enabled(
+            self.children,
+            anchor=self._selected,
+            direction=1,
+        )
 
-    def action_toggle(self) -> None:
+    def action_toggle_button(self) -> None:
         """Toggle the state of the currently-selected button."""
         if self._selected is not None:
             button = self._nodes[self._selected]
             assert isinstance(button, RadioButton)
             button.toggle()
+
+    def _scroll_to_selected(self) -> None:
+        """Ensure that the selected button is in view."""
+        if self._selected is not None:
+            button = self._nodes[self._selected]
+            self.call_after_refresh(self.scroll_to_widget, button, animate=False)

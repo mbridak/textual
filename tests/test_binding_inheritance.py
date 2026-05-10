@@ -28,8 +28,8 @@ MOVEMENT_KEYS = ["up", "down", "left", "right", "home", "end", "pageup", "pagedo
 # An application with no bindings anywhere.
 #
 # The idea of this first little test is that an application that has no
-# bindings set anywhere, and uses a default screen, should only have the one
-# binding in place: ctrl+c; it's hard-coded in the app class for now.
+# bindings set anywhere, and uses a default screen, should only its
+# hard-coded bindings in place.
 
 
 class NoBindings(App[None]):
@@ -37,10 +37,14 @@ class NoBindings(App[None]):
 
 
 async def test_just_app_no_bindings() -> None:
-    """An app with no bindings should have no bindings, other than ctrl+c."""
+    """An app with no bindings should have no bindings, other than the app's hard-coded ones."""
     async with NoBindings().run_test() as pilot:
-        assert list(pilot.app._bindings.keys.keys()) == ["ctrl+c"]
-        assert pilot.app._bindings.get_key("ctrl+c").priority is True
+        assert list(pilot.app._bindings.key_to_bindings.keys()) == [
+            "ctrl+q",
+            "ctrl+c",
+            "ctrl+p",
+        ]
+        assert pilot.app._bindings.get_bindings_for_key("ctrl+q")[0].priority is True
 
 
 ##############################################################################
@@ -48,7 +52,8 @@ async def test_just_app_no_bindings() -> None:
 #
 # Sticking with just an app and the default screen: this configuration has a
 # BINDINGS on the app itself, and simply binds the letter a. The result
-# should be that we see the letter a, ctrl+c, and nothing else.
+# should be that we see the letter a, the app's default bindings, and
+# nothing else.
 
 
 class AlphaBinding(App[None]):
@@ -60,9 +65,11 @@ class AlphaBinding(App[None]):
 async def test_just_app_alpha_binding() -> None:
     """An app with a single binding should have just the one binding."""
     async with AlphaBinding().run_test() as pilot:
-        assert sorted(pilot.app._bindings.keys.keys()) == sorted(["ctrl+c", "a"])
-        assert pilot.app._bindings.get_key("ctrl+c").priority is True
-        assert pilot.app._bindings.get_key("a").priority is True
+        assert sorted(pilot.app._bindings.key_to_bindings.keys()) == sorted(
+            ["ctrl+c", "ctrl+p", "ctrl+q", "a"]
+        )
+        assert pilot.app._bindings.get_bindings_for_key("ctrl+q")[0].priority is True
+        assert pilot.app._bindings.get_bindings_for_key("a")[0].priority is True
 
 
 ##############################################################################
@@ -82,9 +89,11 @@ class LowAlphaBinding(App[None]):
 async def test_just_app_low_priority_alpha_binding() -> None:
     """An app with a single low-priority binding should have just the one binding."""
     async with LowAlphaBinding().run_test() as pilot:
-        assert sorted(pilot.app._bindings.keys.keys()) == sorted(["ctrl+c", "a"])
-        assert pilot.app._bindings.get_key("ctrl+c").priority is True
-        assert pilot.app._bindings.get_key("a").priority is False
+        assert sorted(pilot.app._bindings.key_to_bindings.keys()) == sorted(
+            ["ctrl+c", "ctrl+p", "ctrl+q", "a"]
+        )
+        assert pilot.app._bindings.get_bindings_for_key("ctrl+q")[0].priority is True
+        assert pilot.app._bindings.get_bindings_for_key("a")[0].priority is False
 
 
 ##############################################################################
@@ -113,7 +122,7 @@ class AppWithScreenThatHasABinding(App[None]):
 async def test_app_screen_with_bindings() -> None:
     """Test a screen with a single key binding defined."""
     async with AppWithScreenThatHasABinding().run_test() as pilot:
-        assert pilot.app.screen._bindings.get_key("a").priority is True
+        assert pilot.app.screen._bindings.get_bindings_for_key("a")[0].priority is True
 
 
 ##############################################################################
@@ -142,7 +151,7 @@ class AppWithScreenThatHasALowBinding(App[None]):
 async def test_app_screen_with_low_bindings() -> None:
     """Test a screen with a single low-priority key binding defined."""
     async with AppWithScreenThatHasALowBinding().run_test() as pilot:
-        assert pilot.app.screen._bindings.get_key("a").priority is False
+        assert pilot.app.screen._bindings.get_bindings_for_key("a")[0].priority is False
 
 
 ##############################################################################
@@ -348,7 +357,9 @@ class AppWithScreenWithBindingsWrappedWidgetNoBindings(AppKeyRecorder):
         self.push_screen("main")
 
 
-async def test_contained_focused_child_widget_with_movement_bindings_on_screen() -> None:
+async def test_contained_focused_child_widget_with_movement_bindings_on_screen() -> (
+    None
+):
     """A contained focused child widget, with movement bindings in the screen, should trigger screen actions."""
     async with AppWithScreenWithBindingsWrappedWidgetNoBindings().run_test() as pilot:
         await pilot.press(*AppKeyRecorder.ALL_KEYS)
@@ -439,7 +450,9 @@ class AppWithScreenWithBindingsWidgetNoBindingsNoInherit(AppKeyRecorder):
         self.push_screen("main")
 
 
-async def test_focused_child_widget_no_inherit_with_movement_bindings_on_screen() -> None:
+async def test_focused_child_widget_no_inherit_with_movement_bindings_on_screen() -> (
+    None
+):
     """A focused child widget, that doesn't inherit bindings, with movement bindings in the screen, should trigger screen actions."""
     async with AppWithScreenWithBindingsWidgetNoBindingsNoInherit().run_test() as pilot:
         await pilot.press(*AppKeyRecorder.ALL_KEYS)
@@ -494,7 +507,9 @@ class AppWithScreenWithBindingsWidgetEmptyBindingsNoInherit(AppKeyRecorder):
         self.push_screen("main")
 
 
-async def test_focused_child_widget_no_inherit_empty_bindings_with_movement_bindings_on_screen() -> None:
+async def test_focused_child_widget_no_inherit_empty_bindings_with_movement_bindings_on_screen() -> (
+    None
+):
     """A focused child widget, that doesn't inherit bindings and sets BINDINGS empty, with movement bindings in the screen, should trigger screen actions."""
     async with AppWithScreenWithBindingsWidgetEmptyBindingsNoInherit().run_test() as pilot:
         await pilot.press(*AppKeyRecorder.ALL_KEYS)

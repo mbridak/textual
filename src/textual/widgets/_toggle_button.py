@@ -7,16 +7,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from rich.style import Style
-from rich.text import Text, TextType
+from rich.console import RenderableType
 
-from ..app import RenderResult
-from ..binding import Binding, BindingType
-from ..events import Click
-from ..geometry import Size
-from ..message import Message
-from ..reactive import reactive
-from ._static import Static
+from textual.binding import Binding, BindingType
+from textual.content import Content, ContentText
+from textual.events import Click
+from textual.geometry import Size
+from textual.message import Message
+from textual.reactive import reactive
+from textual.style import Style
+from textual.widgets._static import Static
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -31,8 +31,9 @@ class ToggleButton(Static, can_focus=True):
         [RadioButton][textual.widgets.RadioButton].
     """
 
+    ALLOW_SELECT = False
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("enter,space", "toggle", "Toggle", show=False),
+        Binding("enter,space", "toggle_button", "Toggle", show=False),
     ]
     """
     | Key(s) | Description |
@@ -54,59 +55,68 @@ class ToggleButton(Static, can_focus=True):
     DEFAULT_CSS = """
     ToggleButton {
         width: auto;
-        border: tall transparent;
+        border: tall $border-blurred;
         padding: 0 1;
-        background: $boost;
+        background: $surface;
+        text-wrap: nowrap;
+        text-overflow: ellipsis;
+        pointer: pointer;
+
+        &:ansi {
+            background: ansi_default;
+            & > .toggle--button {
+                background: $ansi-background;
+                color: $ansi-foreground;
+                text-style: dim;
+            }
+            &.-on > .toggle--button {
+                color: $accent;
+                background: $ansi-background;
+                text-style: bold not dim;
+            }
+        }
+        
+        &.-textual-compact {
+            border: none !important;
+            padding: 0;
+            &:focus {
+                border: tall $border;
+                background-tint: $foreground 5%;
+                & > .toggle--label {
+                    color: $block-cursor-foreground;
+                    background: $block-cursor-background;
+                    text-style: $block-cursor-text-style;
+                }
+            }
+        }
+
+        & > .toggle--button {
+            color: $panel-darken-2;
+            background: $panel;
+        }
+
+        &.-on > .toggle--button {
+            color: $text-success;
+            background: $panel;
+        }
+
+        &:focus {       
+            border: tall $border;            
+            background-tint: $foreground 5%;     
+     
+            & > .toggle--label {                         
+                color: $block-cursor-foreground;
+                background: $block-cursor-background;       
+                text-style: $block-cursor-text-style;                
+            }
+        }
+        &:blur:hover {
+            & > .toggle--label {
+                background: $block-hover-background;
+            }
+        }
     }
-
-    ToggleButton:focus {
-        border: tall $accent;
-    }
-
-    ToggleButton:hover {
-        text-style: bold;
-        background: $boost;
-    }
-
-    ToggleButton:focus > .toggle--label {
-        text-style: underline;
-    }
-
-    /* Base button colours (including in dark mode). */
-
-    ToggleButton > .toggle--button {
-        color: $background;
-        text-style: bold;
-        background: $foreground 15%;
-    }
-
-    ToggleButton:focus > .toggle--button {
-        background: $foreground 25%;
-    }
-
-    ToggleButton.-on > .toggle--button {
-        color: $success;
-    }
-
-    ToggleButton.-on:focus > .toggle--button {
-        background: $foreground 25%;
-    }
-
-    /* Light mode overrides. */
-
-    App.-light-mode ToggleButton > .toggle--button {
-        color: $background;
-        background: $foreground 10%;
-    }
-
-    App.-light-mode ToggleButton:focus > .toggle--button {
-        background: $foreground 25%;
-    }
-
-    App.-light-mode ToggleButton.-on > .toggle--button {
-        color: $primary;
-    }
-    """  # TODO: https://github.com/Textualize/textual/issues/1780
+    """
 
     BUTTON_LEFT: str = "▐"
     """The character used for the left side of the toggle button."""
@@ -120,9 +130,12 @@ class ToggleButton(Static, can_focus=True):
     value: reactive[bool] = reactive(False, init=False)
     """The value of the button. `True` for on, `False` for off."""
 
+    compact: reactive[bool] = reactive(False, toggle_class="-textual-compact")
+    """Enable compact display?"""
+
     def __init__(
         self,
-        label: TextType = "",
+        label: ContentText = "",
         value: bool = False,
         button_first: bool = True,
         *,
@@ -130,6 +143,8 @@ class ToggleButton(Static, can_focus=True):
         id: str | None = None,
         classes: str | None = None,
         disabled: bool = False,
+        tooltip: RenderableType | None = None,
+        compact: bool = False,
     ) -> None:
         """Initialise the toggle.
 
@@ -141,73 +156,84 @@ class ToggleButton(Static, can_focus=True):
             id: The ID of the toggle in the DOM.
             classes: The CSS classes of the toggle.
             disabled: Whether the button is disabled or not.
+            tooltip: RenderableType | None = None,
+            compact: Show a compact button.
         """
         super().__init__(name=name, id=id, classes=classes, disabled=disabled)
         self._button_first = button_first
         # NOTE: Don't send a Changed message in response to the initial set.
         with self.prevent(self.Changed):
             self.value = value
-        self._label = Text.from_markup(label) if isinstance(label, str) else label
-        try:
-            # Only use the first line if it's a multi-line label.
-            self._label = self._label.split()[0]
-        except IndexError:
-            pass
+        self._label = self._make_label(label)
+        if tooltip is not None:
+            self.tooltip = tooltip
+        self.compact = compact
+
+    def _make_label(self, label: ContentText) -> Content:
+        """Make label content.
+
+        Args:
+            label: The source value for the label.
+
+        Returns:
+            A `Content` rendering of the label for use in the button.
+        """
+        label = Content.from_text(label).first_line.rstrip()
+        return label
 
     @property
-    def label(self) -> Text:
+    def label(self) -> Content:
         """The label associated with the button."""
         return self._label
 
+    @label.setter
+    def label(self, label: ContentText) -> None:
+        self._label = self._make_label(label)
+        self.refresh(layout=True)
+
     @property
-    def _button(self) -> Text:
+    def _button(self) -> Content:
         """The button, reflecting the current value."""
 
         # Grab the button style.
-        button_style = self.get_component_rich_style("toggle--button")
-
-        # If the button is off, we're going to do a bit of a switcharound to
-        # make it look like it's a "cutout".
-        if not self.value:
-            button_style += Style.from_color(
-                self.background_colors[1].rich_color, button_style.bgcolor
-            )
+        button_style = self.get_visual_style("toggle--button")
 
         # Building the style for the side characters. Note that this is
         # sensitive to the type of character used, so pay attention to
         # BUTTON_LEFT and BUTTON_RIGHT.
-        side_style = Style.from_color(
-            button_style.bgcolor, self.background_colors[1].rich_color
+        side_style = Style(
+            foreground=button_style.background,
+            background=self.background_colors[1],
         )
 
-        return Text.assemble(
+        return Content.assemble(
             (self.BUTTON_LEFT, side_style),
             (self.BUTTON_INNER, button_style),
             (self.BUTTON_RIGHT, side_style),
         )
 
-    def render(self) -> RenderResult:
+    def render(self) -> Content:
         """Render the content of the widget.
 
         Returns:
             The content to render for the widget.
         """
         button = self._button
-        label = self._label.copy()
-        label.stylize(self.get_component_rich_style("toggle--label", partial=True))
-        spacer = " " if label else ""
-        return Text.assemble(
-            *(
-                (button, spacer, label)
-                if self._button_first
-                else (label, spacer, button)
-            ),
-            no_wrap=True,
-            overflow="ellipsis",
-        )
+        label_style = self.get_visual_style("toggle--label")
+        label = self._label.pad(1, 1).stylize_before(label_style)
+
+        if self._button_first:
+            content = Content.assemble(button, label)
+        else:
+            content = Content.assemble(label, button)
+        return content
 
     def get_content_width(self, container: Size, viewport: Size) -> int:
-        return self._button.cell_len + (1 if self._label else 0) + self._label.cell_len
+        return (
+            self._button.get_optimal_width(self.styles, 0)
+            + (2 if self._label else 0)
+            + self._label.get_optimal_width(self.styles, 0)
+        )
 
     def get_content_height(self, container: Size, viewport: Size, width: int) -> int:
         return 1
@@ -221,7 +247,7 @@ class ToggleButton(Static, can_focus=True):
         self.value = not self.value
         return self
 
-    def action_toggle(self) -> None:
+    def action_toggle_button(self) -> None:
         """Toggle the value of the widget when called as an action.
 
         This would normally be used for a keyboard binding.
@@ -232,7 +258,7 @@ class ToggleButton(Static, can_focus=True):
         """Toggle the value of the widget when clicked with the mouse."""
         self.toggle()
 
-    class Changed(Message, bubble=True):
+    class Changed(Message):
         """Posted when the value of the toggle button changes."""
 
         def __init__(self, toggle_button: ToggleButton, value: bool) -> None:

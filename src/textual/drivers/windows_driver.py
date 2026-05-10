@@ -5,12 +5,12 @@ import sys
 from threading import Event, Thread
 from typing import TYPE_CHECKING, Callable
 
-from ..driver import Driver
-from . import win32
-from ._writer_thread import WriterThread
+from textual.driver import Driver
+from textual.drivers import win32
+from textual.drivers._writer_thread import WriterThread
 
 if TYPE_CHECKING:
-    from ..app import App
+    from textual.app import App
 
 
 class WindowsDriver(Driver):
@@ -21,6 +21,7 @@ class WindowsDriver(Driver):
         app: App,
         *,
         debug: bool = False,
+        mouse: bool = True,
         size: tuple[int, int] | None = None,
     ) -> None:
         """Initialize Windows driver.
@@ -28,14 +29,20 @@ class WindowsDriver(Driver):
         Args:
             app: The App instance.
             debug: Enable debug mode.
+            mouse: Enable mouse support.
             size: Initial size of the terminal or `None` to detect.
         """
-        super().__init__(app, debug=debug, size=size)
+        super().__init__(app, debug=debug, mouse=mouse, size=size)
         self._file = sys.__stdout__
         self.exit_event = Event()
         self._event_thread: Thread | None = None
         self._restore_console: Callable[[], None] | None = None
         self._writer_thread: WriterThread | None = None
+
+    @property
+    def can_suspend(self) -> bool:
+        """Can this driver be suspended?"""
+        return True
 
     def write(self, data: str) -> None:
         """Write data to the output device.
@@ -48,6 +55,8 @@ class WindowsDriver(Driver):
 
     def _enable_mouse_support(self) -> None:
         """Enable reporting of mouse events."""
+        if not self._mouse:
+            return
         write = self.write
         write("\x1b[?1000h")  # SET_VT200_MOUSE
         write("\x1b[?1003h")  # SET_ANY_EVENT_MOUSE
@@ -57,6 +66,8 @@ class WindowsDriver(Driver):
 
     def _disable_mouse_support(self) -> None:
         """Disable reporting of mouse events."""
+        if not self._mouse:
+            return
         write = self.write
         write("\x1b[?1000l")
         write("\x1b[?1003l")
@@ -84,11 +95,13 @@ class WindowsDriver(Driver):
         self.write("\x1b[?1049h")  # Enable alt screen
         self._enable_mouse_support()
         self.write("\x1b[?25l")  # Hide cursor
-        self.write("\033[?1003h\n")
+        self.write("\033[?1004h")  # Enable FocusIn/FocusOut.
+        self.write("\x1b[>1u")  # https://sw.kovidgoyal.net/kitty/keyboard-protocol/
+        self.flush()
         self._enable_bracketed_paste()
 
         self._event_thread = win32.EventMonitor(
-            loop, self._app, self.exit_event, self.process_event
+            loop, self._app, self.exit_event, self.process_message
         )
         self._event_thread.start()
 
@@ -111,8 +124,13 @@ class WindowsDriver(Driver):
         self._disable_bracketed_paste()
         self.disable_input()
 
+        # Disable the Kitty keyboard protocol. This must be done before leaving
+        # the alt screen. https://sw.kovidgoyal.net/kitty/keyboard-protocol/
+        self.write("\x1b[<u")
+
         # Disable alt screen, show cursor
         self.write("\x1b[?1049l" + "\x1b[?25h")
+        self.write("\033[?1004l")  # Disable FocusIn/FocusOut.
         self.flush()
 
     def close(self) -> None:

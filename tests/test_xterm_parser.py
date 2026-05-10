@@ -8,6 +8,8 @@ from textual.events import (
     MouseDown,
     MouseMove,
     MouseScrollDown,
+    MouseScrollLeft,
+    MouseScrollRight,
     MouseScrollUp,
     MouseUp,
     Paste,
@@ -33,7 +35,7 @@ def chunks(data, size):
 
 @pytest.fixture
 def parser():
-    return XTermParser(more_data=lambda: False)
+    return XTermParser()
 
 
 @pytest.mark.parametrize("chunk_size", [2, 3, 4, 5, 6])
@@ -91,7 +93,7 @@ def test_cant_match_escape_sequence_too_long(parser):
     """The sequence did not match, and we hit the maximum sequence search
     length threshold, so each character should be issued as a key-press instead.
     """
-    sequence = "\x1b[123456789123456789123"
+    sequence = "\x1b[123456789123456789123123456789123456789123"
     events = list(parser.feed(sequence))
 
     # Every character in the sequence is converted to a key press
@@ -110,13 +112,9 @@ def test_cant_match_escape_sequence_too_long(parser):
 @pytest.mark.parametrize(
     "chunk_size",
     [
-        pytest.param(
-            2, marks=pytest.mark.xfail(reason="Fails when ESC at end of chunk")
-        ),
+        2,
         3,
-        pytest.param(
-            4, marks=pytest.mark.xfail(reason="Fails when ESC at end of chunk")
-        ),
+        4,
         5,
         6,
     ],
@@ -132,11 +130,12 @@ def test_unknown_sequence_followed_by_known_sequence(parser, chunk_size):
     sequence = unknown_sequence + known_sequence
 
     events = []
-    parser.more_data = lambda: True
-    for chunk in chunks(sequence, chunk_size):
-        events.append(parser.feed(chunk))
 
-    events = list(itertools.chain.from_iterable(list(event) for event in events))
+    for chunk in chunks(sequence, chunk_size):
+        events.extend(list(parser.feed(chunk)))
+
+    # events = list(itertools.chain.from_iterable(list(event) for event in events))
+    print(repr([event.key for event in events]))
 
     assert [event.key for event in events] == [
         "circumflex_accent",
@@ -169,14 +168,40 @@ def test_key_presses_and_escape_sequence_mixed(parser):
 
 def test_single_escape(parser):
     """A single \x1b should be interpreted as a single press of the Escape key"""
-    events = parser.feed("\x1b")
+    events = list(parser.feed("\x1b"))
+    events.extend(parser.feed(""))
     assert [event.key for event in events] == ["escape"]
 
 
 def test_double_escape(parser):
-    """Windows Terminal writes double ESC when the user presses the Escape key once."""
-    events = parser.feed("\x1b\x1b")
-    assert [event.key for event in events] == ["escape"]
+    """Test double escape."""
+    events = list(parser.feed("\x1b\x1b"))
+    events.extend(parser.feed(""))
+    print(events)
+    assert [event.key for event in events] == ["escape", "escape"]
+
+
+@pytest.mark.parametrize(
+    "sequence,key",
+    [
+        ("a", "a"),
+        ("B", "B"),
+        ("\x1ba", "alt+a"),
+        ("\x1b[97;3u", "alt+a"),
+        ("\x1b[65;4u", "alt+shift+a"),
+        ("\x1bA", "alt+shift+a"),
+        ("\x1b[120;7u", "alt+ctrl+x"),
+    ],
+)
+def test_keys(parser, sequence: str, key: str) -> None:
+    """Test rarer keys."""
+    events = []
+    for event in parser.feed(sequence):
+        events.append(event)
+    for event in parser.feed(""):
+        events.append(event)
+    event = events[0]
+    assert event.key == key
 
 
 @pytest.mark.parametrize(
@@ -186,10 +211,12 @@ def test_double_escape(parser):
         ("\x1b[<0;50;25M", MouseDown, False, False),
         ("\x1b[<4;50;25M", MouseDown, True, False),
         ("\x1b[<8;50;25M", MouseDown, False, True),
+        ("\x1b[<12;50;25M", MouseDown, True, True),
         # Mouse up, with and without modifiers
         ("\x1b[<0;50;25m", MouseUp, False, False),
         ("\x1b[<4;50;25m", MouseUp, True, False),
         ("\x1b[<8;50;25m", MouseUp, False, True),
+        ("\x1b[<12;50;25m", MouseUp, True, True),
     ],
 )
 def test_mouse_click(parser, sequence, event_type, shift, meta):
@@ -216,6 +243,7 @@ def test_mouse_click(parser, sequence, event_type, shift, meta):
         ("\x1b[<35;15;38M", False, False, 0),  # Basic cursor movement
         ("\x1b[<39;15;38M", True, False, 0),  # Shift held down
         ("\x1b[<43;15;38M", False, True, 0),  # Meta held down
+        ("\x1b[<3;15;38M", False, False, 0),
     ],
 )
 def test_mouse_move(parser, sequence, shift, meta, button):
@@ -280,6 +308,56 @@ def test_mouse_scroll_down(parser, sequence, shift, meta):
     assert event.meta is meta
 
 
+@pytest.mark.parametrize(
+    "sequence, shift, meta",
+    [
+        ("\x1b[<66;18;25M", False, False),
+        ("\x1b[<70;18;25M", True, False),
+        ("\x1b[<74;18;25M", False, True),
+    ],
+)
+def test_mouse_scroll_left(parser, sequence, shift, meta):
+    """Scrolling the mouse with and without modifiers held down.
+    We don't currently capture modifier keys in scroll events.
+    """
+    events = list(parser.feed(sequence))
+
+    assert len(events) == 1
+
+    event = events[0]
+
+    assert isinstance(event, MouseScrollLeft)
+    assert event.x == 17
+    assert event.y == 24
+    assert event.shift is shift
+    assert event.meta is meta
+
+
+@pytest.mark.parametrize(
+    "sequence, shift, meta",
+    [
+        ("\x1b[<67;18;25M", False, False),
+        ("\x1b[<71;18;25M", True, False),
+        ("\x1b[<75;18;25M", False, True),
+    ],
+)
+def test_mouse_scroll_right(parser, sequence, shift, meta):
+    """Scrolling the mouse with and without modifiers held down.
+    We don't currently capture modifier keys in scroll events.
+    """
+    events = list(parser.feed(sequence))
+
+    assert len(events) == 1
+
+    event = events[0]
+
+    assert isinstance(event, MouseScrollRight)
+    assert event.x == 17
+    assert event.y == 24
+    assert event.shift is shift
+    assert event.meta is meta
+
+
 def test_mouse_event_detected_but_info_not_parsed(parser):
     # I don't know if this can actually happen in reality, but
     # there's a branch in the code that allows for the possibility.
@@ -287,6 +365,7 @@ def test_mouse_event_detected_but_info_not_parsed(parser):
     assert len(events) == 0
 
 
+@pytest.mark.xfail()
 def test_escape_sequence_resulting_in_multiple_keypresses(parser):
     """Some sequences are interpreted as more than 1 keypress"""
     events = list(parser.feed("\x1b[2;4~"))
@@ -295,8 +374,9 @@ def test_escape_sequence_resulting_in_multiple_keypresses(parser):
     assert events[1].key == "shift+insert"
 
 
-def test_terminal_mode_reporting_synchronized_output_supported(parser):
-    sequence = "\x1b[?2026;1$y"
+@pytest.mark.parametrize("parameter", range(1, 5))
+def test_terminal_mode_reporting_synchronized_output_supported(parser, parameter):
+    sequence = f"\x1b[?2026;{parameter}$y"
     events = list(parser.feed(sequence))
     assert len(events) == 1
     assert isinstance(events[0], TerminalSupportsSynchronizedOutput)

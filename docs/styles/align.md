@@ -1,6 +1,8 @@
 # Align
 
-The `align` style aligns children within a container.
+The `align` style defines how a widget's *children* are aligned.
+
+Apply this rule to a container to adjust where its children are positioned.
 
 ## Syntax
 
@@ -11,7 +13,7 @@ align-horizontal: <a href="../../css_types/horizontal">&lt;horizontal&gt;</a>;
 align-vertical: <a href="../../css_types/vertical">&lt;vertical&gt;</a>;
 --8<-- "docs/snippets/syntax_block_end.md"
 
-The `align` style takes a [`<horizontal>`](../../css_types/horizontal) followed by a [`<vertical>`](../../css_types/vertical).
+The `align` style takes a [`<horizontal>`](../css_types/horizontal.md) followed by a [`<vertical>`](../css_types/vertical.md).
 
 You can also set the alignment for each axis individually with `align-horizontal` and `align-vertical`.
 
@@ -32,10 +34,10 @@ This example contains a simple app with two labels centered on the screen with `
     --8<-- "docs/examples/styles/align.py"
     ```
 
-=== "align.css"
+=== "align.tcss"
 
-    ```sass hl_lines="2"
-    --8<-- "docs/examples/styles/align.css"
+    ```css hl_lines="2"
+    --8<-- "docs/examples/styles/align.tcss"
     ```
 
 ### All alignments
@@ -54,15 +56,15 @@ Each label has been aligned differently inside its container, and its text shows
     --8<-- "docs/examples/styles/align_all.py"
     ```
 
-=== "align_all.css"
+=== "align_all.tcss"
 
-    ```sass hl_lines="2 6 10 14 18 22 26 30 34"
-    --8<-- "docs/examples/styles/align_all.css"
+    ```css hl_lines="2 6 10 14 18 22 26 30 34"
+    --8<-- "docs/examples/styles/align_all.tcss"
     ```
 
 ## CSS
 
-```sass
+```css
 /* Align child widgets to the center. */
 align: center middle;
 /* Align child widget to the top right */

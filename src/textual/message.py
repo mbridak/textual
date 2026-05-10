@@ -8,15 +8,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 import rich.repr
+from typing_extensions import Self
 
-from . import _time
-from ._context import active_message_pump
-from ._types import MessageTarget
-from .case import camel_to_snake
+from textual import _time
+from textual._context import active_message_pump
+from textual.case import camel_to_snake
 
 if TYPE_CHECKING:
-    from .message_pump import MessagePump
-    from .widget import Widget
+    from textual.dom import DOMNode
+    from textual.message_pump import MessagePump
 
 
 @rich.repr.auto
@@ -74,11 +74,19 @@ class Message:
             cls.no_dispatch = no_dispatch
         if namespace is not None:
             cls.namespace = namespace
-        name = camel_to_snake(cls.__name__)
-        cls.handler_name = f"on_{namespace}_{name}" if namespace else f"on_{name}"
+            name = f"{namespace}_{camel_to_snake(cls.__name__)}"
+        else:
+            # a class defined inside of a function will have a qualified name like func.<locals>.Class,
+            # so make sure we only use the actual class name(s)
+            qualname = cls.__qualname__.rsplit("<locals>.", 1)[-1]
+            # only keep the last two parts of the qualified name of deeply nested classes
+            # for backwards compatibility, e.g. A.B.C.D becomes C.D
+            namespace = qualname.rsplit(".", 2)[-2:]
+            name = "_".join(camel_to_snake(part) for part in namespace)
+        cls.handler_name = f"on_{name}"
 
     @property
-    def control(self) -> Widget | None:
+    def control(self) -> DOMNode | None:
         """The widget associated with this message, or None by default."""
         return None
 
@@ -91,9 +99,23 @@ class Message:
         """Mark this event as being forwarded."""
         self._forwarded = True
 
-    def _set_sender(self, sender: MessagePump) -> None:
-        """Set the sender."""
+    def set_sender(self, sender: MessagePump) -> Self:
+        """Set the sender of the message.
+
+        Args:
+            sender: The sender.
+
+        Note:
+            When creating a message the sender is automatically set.
+            Normally there will be no need for this method to be called.
+            This method will be used when strict control is required over
+            the sender of a message.
+
+        Returns:
+            Self.
+        """
         self._sender = sender
+        return self
 
     def can_replace(self, message: "Message") -> bool:
         """Check if another message may supersede this one.
@@ -132,4 +154,5 @@ class Message:
         Args:
             widget: Target of bubble.
         """
+        self._no_default_action = False
         widget.post_message(self)

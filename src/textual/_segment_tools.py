@@ -4,14 +4,30 @@ Tools for processing Segments, or lists of Segments.
 
 from __future__ import annotations
 
+import re
+from functools import lru_cache
 from typing import Iterable
 
 from rich.segment import Segment
 from rich.style import Style
 
-from ._cells import cell_len
-from .css.types import AlignHorizontal, AlignVertical
-from .geometry import Size
+from textual._cells import cell_len
+from textual.css.types import AlignHorizontal, AlignVertical
+from textual.geometry import Size
+
+
+@lru_cache(1024 * 8)
+def make_blank(width, style: Style) -> Segment:
+    """Make a blank segment.
+
+    Args:
+        width: Width of blank.
+        style: Style of blank.
+
+    Returns:
+        A single segment
+    """
+    return Segment(" " * width, style)
 
 
 class NoCellPositionForIndex(Exception):
@@ -161,19 +177,19 @@ def line_pad(
     """
     if pad_left and pad_right:
         return [
-            Segment(" " * pad_left, style),
+            make_blank(pad_left, style),
             *segments,
-            Segment(" " * pad_right, style),
+            make_blank(pad_right, style),
         ]
     elif pad_left:
         return [
-            Segment(" " * pad_left, style),
+            make_blank(pad_left, style),
             *segments,
         ]
     elif pad_right:
         return [
             *segments,
-            Segment(" " * pad_right, style),
+            make_blank(pad_right, style),
         ]
     return list(segments)
 
@@ -197,12 +213,24 @@ def align_lines(
     Returns:
         Aligned lines.
     """
-
+    if not lines:
+        return
     width, height = size
-    shape_width, shape_height = Segment.get_shape(lines)
+    get_line_length = Segment.get_line_length
+    line_lengths = [get_line_length(line) for line in lines]
+    shape_width = max(line_lengths)
+    shape_height = len(line_lengths)
 
     def blank_lines(count: int) -> list[list[Segment]]:
-        return [[Segment(" " * width, style)]] * count
+        """Create blank lines.
+
+        Args:
+            count: Desired number of blank lines.
+
+        Returns:
+            A list of blank lines.
+        """
+        return [[make_blank(width, style)]] * count
 
     top_blank_lines = bottom_blank_lines = 0
     vertical_excess_space = max(0, height - shape_height)
@@ -211,31 +239,69 @@ def align_lines(
         bottom_blank_lines = vertical_excess_space
     elif vertical == "middle":
         top_blank_lines = vertical_excess_space // 2
-        bottom_blank_lines = height - top_blank_lines
+        bottom_blank_lines = vertical_excess_space - top_blank_lines
     elif vertical == "bottom":
         top_blank_lines = vertical_excess_space
 
-    yield from blank_lines(top_blank_lines)
+    if top_blank_lines:
+        yield from blank_lines(top_blank_lines)
 
-    horizontal_excess_space = max(0, width - shape_width)
-
-    adjust_line_length = Segment.adjust_line_length
     if horizontal == "left":
-        for line in lines:
-            yield adjust_line_length(line, width, style, pad=True)
+        for cell_length, line in zip(line_lengths, lines):
+            if cell_length == width:
+                yield line
+            else:
+                yield line_pad(line, 0, width - cell_length, style)
 
     elif horizontal == "center":
-        left_space = horizontal_excess_space // 2
-        for line in lines:
-            yield [
-                Segment(" " * left_space, style),
-                *adjust_line_length(line, width - left_space, style, pad=True),
-            ]
+        left_space = max(0, width - shape_width) // 2
+        for cell_length, line in zip(line_lengths, lines):
+            if cell_length == width:
+                yield line
+            else:
+                yield line_pad(
+                    line, left_space, width - cell_length - left_space, style
+                )
 
     elif horizontal == "right":
-        get_line_length = Segment.get_line_length
-        for line in lines:
-            left_space = width - get_line_length(line)
-            yield [Segment(" " * left_space, style), *line]
+        for cell_length, line in zip(line_lengths, lines):
+            if width == cell_length:
+                yield line
+            else:
+                yield line_pad(line, width - cell_length, 0, style)
 
-    yield from blank_lines(bottom_blank_lines)
+    if bottom_blank_lines:
+        yield from blank_lines(bottom_blank_lines)
+
+
+_re_spaces = re.compile(r"(\s+|\S+)")
+
+
+def apply_hatch(
+    segments: Iterable[Segment],
+    character: str,
+    hatch_style: Style,
+    _split=_re_spaces.split,
+) -> Iterable[Segment]:
+    """Replace run of spaces with another character + style.
+
+    Args:
+        segments: Segments to process.
+        character: Character to replace spaces.
+        hatch_style: Style of replacement characters.
+
+    Yields:
+        Segments.
+    """
+    _Segment = Segment
+    for segment in segments:
+        if " " not in segment.text:
+            yield segment
+        else:
+            text, style, _ = segment
+            for token in _split(text):
+                if token:
+                    if token.isspace():
+                        yield _Segment(character * len(token), hatch_style)
+                    else:
+                        yield _Segment(token, style)

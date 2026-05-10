@@ -1,34 +1,19 @@
 from __future__ import annotations
 
-from rich.console import RenderableType
-from rich.protocol import is_renderable
-from rich.text import Text
+from typing import TYPE_CHECKING
 
-from ..errors import RenderError
-from ..widget import Widget
+if TYPE_CHECKING:
+    from textual.app import RenderResult
 
-
-def _check_renderable(renderable: object):
-    """Check if a renderable conforms to the Rich Console protocol
-    (https://rich.readthedocs.io/en/latest/protocol.html)
-
-    Args:
-        renderable: A potentially renderable object.
-
-    Raises:
-        RenderError: If the object can not be rendered.
-    """
-    if not is_renderable(renderable):
-        raise RenderError(
-            f"unable to render {renderable!r}; a string, Text, or other Rich renderable is required"
-        )
+from textual.visual import Visual, VisualType, visualize
+from textual.widget import Widget
 
 
 class Static(Widget, inherit_bindings=False):
     """A widget to display simple static content, or use as a base class for more complex widgets.
 
     Args:
-        renderable: A Rich renderable, or string containing console markup.
+        content: A Content object, Rich renderable, or string containing console markup.
         expand: Expand content if required to fill container.
         shrink: Shrink content if required to fill container.
         markup: True if markup should be parsed and rendered.
@@ -44,11 +29,9 @@ class Static(Widget, inherit_bindings=False):
     }
     """
 
-    _renderable: RenderableType
-
     def __init__(
         self,
-        renderable: RenderableType = "",
+        content: VisualType = "",
         *,
         expand: bool = False,
         shrink: bool = False,
@@ -58,41 +41,55 @@ class Static(Widget, inherit_bindings=False):
         classes: str | None = None,
         disabled: bool = False,
     ) -> None:
-        super().__init__(name=name, id=id, classes=classes, disabled=disabled)
-        self.expand = expand
-        self.shrink = shrink
-        self.markup = markup
-        self.renderable = renderable
-        _check_renderable(renderable)
+        super().__init__(
+            name=name, id=id, classes=classes, disabled=disabled, markup=markup
+        )
+        self.set_reactive(Widget.expand, expand)
+        self.set_reactive(Widget.shrink, shrink)
+        self.__content = content
+        self.__visual: Visual | None = None
 
     @property
-    def renderable(self) -> RenderableType:
-        return self._renderable or ""
+    def visual(self) -> Visual:
+        """The visual to be displayed.
 
-    @renderable.setter
-    def renderable(self, renderable: RenderableType) -> None:
-        if isinstance(renderable, str):
-            if self.markup:
-                self._renderable = Text.from_markup(renderable)
-            else:
-                self._renderable = Text(renderable)
-        else:
-            self._renderable = renderable
+        Note that the visual is what is ultimately rendered in the widget, but may not be the
+        same object set with the `update` method  or `content` property. For instance, if you
+        update with a string, then the visual will be a [Content][textual.content.Content] instance.
 
-    def render(self) -> RenderableType:
+        """
+        if self.__visual is None:
+            self.__visual = visualize(self, self.__content, markup=self._render_markup)
+        return self.__visual
+
+    @property
+    def content(self) -> VisualType:
+        """The original content set in the constructor."""
+        return self.__content
+
+    @content.setter
+    def content(self, content: VisualType) -> None:
+        self.__content = content
+        self.__visual = visualize(self, content, markup=self._render_markup)
+        self.clear_cached_dimensions()
+        self.refresh(layout=True)
+
+    def render(self) -> RenderResult:
         """Get a rich renderable for the widget's content.
 
         Returns:
             A rich renderable.
         """
-        return self._renderable
+        return self.visual
 
-    def update(self, renderable: RenderableType = "") -> None:
-        """Update the widget's content area with new text or Rich renderable.
+    def update(self, content: VisualType = "", *, layout: bool = True) -> None:
+        """Update the widget's content area with a string, a Visual (such as [Content][textual.content.Content]), or a [Rich renderable](https://rich.readthedocs.io/en/latest/protocol.html).
 
         Args:
-            renderable: A new rich renderable. Defaults to empty renderable;
+            content: New content.
+            layout: Also perform a layout operation (set to `False` if you are certain the size won't change).
         """
-        _check_renderable(renderable)
-        self.renderable = renderable
-        self.refresh(layout=True)
+
+        self.__content = content
+        self.__visual = visualize(self, content, markup=self._render_markup)
+        self.refresh(layout=layout)

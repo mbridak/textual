@@ -5,19 +5,21 @@ from typing import Iterable, Sequence
 
 from typing_extensions import Literal
 
+from textual.color import ColorParseError
 from textual.css._error_tools import friendly_list
-from textual.css.scalar import SYMBOL_UNIT
-
-from ..color import ColorParseError
-from ._help_renderables import Bullet, Example, HelpText
-from .constants import (
+from textual.css._help_renderables import Bullet, Example, HelpText
+from textual.css.constants import (
     VALID_ALIGN_HORIZONTAL,
     VALID_ALIGN_VERTICAL,
     VALID_BORDER,
+    VALID_EXPAND,
+    VALID_KEYLINE,
     VALID_LAYOUT,
+    VALID_POSITION,
     VALID_STYLE_FLAGS,
     VALID_TEXT_ALIGN,
 )
+from textual.css.scalar import SYMBOL_UNIT
 
 StylingContext = Literal["inline", "css"]
 """The type of styling the user was using when the error was encountered.
@@ -149,7 +151,7 @@ def property_invalid_value_help_text(
         suggested_property_name = _contextualize_property_name(
             suggested_property_name, context
         )
-        summary += f'. Did you mean "{suggested_property_name}"?'
+        summary += f". Did you mean '{suggested_property_name}'?"
     return HelpText(summary)
 
 
@@ -305,9 +307,10 @@ def color_property_help_text(
     context: StylingContext,
     *,
     error: Exception | None = None,
+    value: str | None = None,
 ) -> HelpText:
     """Help text to show when the user supplies an invalid value for a color
-    property. For example, an unparseable color string.
+    property. For example, an unparsable color string.
 
     Args:
         property_name: The name of the property.
@@ -318,12 +321,15 @@ def color_property_help_text(
         Renderable for displaying the help text for this property.
     """
     property_name = _contextualize_property_name(property_name, context)
-    summary = f"Invalid value for the [i]{property_name}[/] property"
+    if value is None:
+        summary = f"Invalid value for the [i]{property_name}[/] property"
+    else:
+        summary = f"Invalid value ({value!r}) for the [i]{property_name}[/] property"
     suggested_color = (
         error.suggested_color if error and isinstance(error, ColorParseError) else None
     )
     if suggested_color:
-        summary += f'. Did you mean "{suggested_color}"?'
+        summary += f". Did you mean '{suggested_color}'?"
     return HelpText(
         summary=summary,
         bullets=[
@@ -456,18 +462,53 @@ def dock_property_help_text(property_name: str, context: StylingContext) -> Help
     return HelpText(
         summary=f"Invalid value for [i]{property_name}[/] property",
         bullets=[
-            Bullet("The value must be one of 'top', 'right', 'bottom' or 'left'"),
+            Bullet(
+                "The value must be one of 'top', 'right', 'bottom', 'left' or 'none'"
+            ),
             *ContextSpecificBullets(
                 inline=[
                     Bullet(
-                        "The 'dock' rule aligns a widget relative to the screen.",
+                        "The 'dock' rule attaches a widget to the edge of a container.",
                         examples=[Example('header.styles.dock = "top"')],
                     )
                 ],
                 css=[
                     Bullet(
-                        "The 'dock' rule aligns a widget relative to the screen.",
+                        "The 'dock' rule attaches a widget to the edge of a container.",
                         examples=[Example("dock: top")],
+                    )
+                ],
+            ).get_by_context(context),
+        ],
+    )
+
+
+def split_property_help_text(property_name: str, context: StylingContext) -> HelpText:
+    """Help text to show when the user supplies an invalid value for split.
+
+    Args:
+        property_name: The name of the property.
+        context: The context the property is being used in.
+
+    Returns:
+        Renderable for displaying the help text for this property.
+    """
+    property_name = _contextualize_property_name(property_name, context)
+    return HelpText(
+        summary=f"Invalid value for [i]{property_name}[/] property",
+        bullets=[
+            Bullet("The value must be one of 'top', 'right', 'bottom' or 'left'"),
+            *ContextSpecificBullets(
+                inline=[
+                    Bullet(
+                        "The 'split' splits the container and aligns the widget to the given edge.",
+                        examples=[Example('header.styles.split = "top"')],
+                    )
+                ],
+                css=[
+                    Bullet(
+                        "The 'split' splits the container and aligns the widget to the given edge.",
+                        examples=[Example("split: top")],
                     )
                 ],
             ).get_by_context(context),
@@ -587,9 +628,7 @@ def scrollbar_size_property_help_text(context: StylingContext) -> HelpText:
                     ),
                 ],
             ).get_by_context(context),
-            Bullet(
-                "<horizontal> and <vertical> must be positive integers, greater than zero"
-            ),
+            Bullet("<horizontal> and <vertical> must be non-negative integers."),
         ],
     )
 
@@ -669,6 +708,26 @@ def align_help_text() -> HelpText:
     )
 
 
+def keyline_help_text() -> HelpText:
+    """Help text to show when the user supplies an invalid value for a `keyline`.
+
+    Returns:
+        Renderable for displaying the help text for this property.
+    """
+    return HelpText(
+        summary="Invalid value for [i]keyline[/] property",
+        bullets=[
+            Bullet(
+                markup="The [i]keyline[/] property expects exactly 2 values",
+                examples=[
+                    Example("keyline: <type> <color>"),
+                ],
+            ),
+            Bullet(f"Valid values for <type> are {friendly_list(VALID_KEYLINE)}"),
+        ],
+    )
+
+
 def text_align_help_text() -> HelpText:
     """Help text to show when the user supplies an invalid value for the text-align property.
 
@@ -709,6 +768,40 @@ def offset_single_axis_help_text(property_name: str) -> HelpText:
                 ],
             ),
             Bullet(f"Valid scalar units are {friendly_list(SYMBOL_UNIT)}"),
+        ],
+    )
+
+
+def position_help_text(property_name: str) -> HelpText:
+    """Help text to show when the user supplies the wrong value for position.
+
+    Args:
+        property_name: The name of the property.
+
+    Returns:
+        Renderable for displaying the help text for this property.
+    """
+    return HelpText(
+        summary=f"Invalid value for [i]{property_name}[/]",
+        bullets=[
+            Bullet(f"Valid values are {friendly_list(VALID_POSITION)}"),
+        ],
+    )
+
+
+def expand_help_text(property_name: str) -> HelpText:
+    """Help text to show when the user supplies the wrong value for expand.
+
+    Args:
+        property_name: The name of the property.
+
+    Returns:
+        Renderable for displaying the help text for this property.
+    """
+    return HelpText(
+        summary=f"Invalid value for [i]{property_name}[/]",
+        bullets=[
+            Bullet(f"Valid values are {friendly_list(VALID_EXPAND)}"),
         ],
     )
 

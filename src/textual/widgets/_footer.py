@@ -1,144 +1,333 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import ClassVar, Optional
+from itertools import groupby
+from typing import TYPE_CHECKING
 
 import rich.repr
-from rich.console import RenderableType
 from rich.text import Text
 
-from .. import events
-from ..reactive import reactive
-from ..widget import Widget
+from textual import events
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.containers import HorizontalGroup, ScrollableContainer
+from textual.reactive import reactive
+from textual.widget import Widget
+from textual.widgets import Label
+
+if TYPE_CHECKING:
+    from textual.screen import Screen
 
 
 @rich.repr.auto
-class Footer(Widget):
-    """A simple footer widget which docks itself to the bottom of the parent container."""
-
-    COMPONENT_CLASSES: ClassVar[set[str]] = {
-        "footer--description",
-        "footer--key",
-        "footer--highlight",
-        "footer--highlight-key",
+class KeyGroup(HorizontalGroup):
+    DEFAULT_CSS = """
+    KeyGroup {
+        width: auto;        
     }
     """
-    | Class | Description |
-    | :- | :- |
-    | `footer--description` | Targets the descriptions of the key bindings. |
-    | `footer--highlight` | Targets the highlighted key binding. |
-    | `footer--highlight-key` | Targets the key portion of the highlighted key binding. |
-    | `footer--key` | Targets the key portions of the key bindings. |
-    """
+
+
+@rich.repr.auto
+class FooterKey(Widget):
+    ALLOW_SELECT = False
+    COMPONENT_CLASSES = {
+        "footer-key--key",
+        "footer-key--description",
+    }
 
     DEFAULT_CSS = """
-    Footer {
-        background: $accent;
-        color: $text;
-        dock: bottom;
+    FooterKey {
+        width: auto;
         height: 1;
-    }
-    Footer > .footer--highlight {
-        background: $accent-darken-1;
-    }
+        text-wrap: nowrap;
+        background: $footer-item-background;
+        .footer-key--key {
+            color: $footer-key-foreground;
+            background: $footer-key-background;
+            text-style: bold;
+            padding: 0 1;
+        }
 
-    Footer > .footer--highlight-key {
-        background: $secondary;
-        text-style: bold;
-    }
+        .footer-key--description {
+            padding: 0 1 0 0;
+            color: $footer-description-foreground;
+            background: $footer-description-background;
+        }
 
-    Footer > .footer--key {
-        text-style: bold;
-        background: $accent-darken-2;
+        &:hover {
+            pointer: pointer;
+            color: $footer-key-foreground;
+            background: $block-hover-background;            
+        }
+
+        &.-disabled {
+            text-style: dim;
+        }
+
+        &.-compact {
+            .footer-key--key {
+                padding: 0;
+            }
+            .footer-key--description {
+                padding: 0 0 0 1;
+            }
+        }
     }
     """
 
-    highlight_key: reactive[str | None] = reactive[Optional[str]](None)
+    compact = reactive(True)
+    """Display compact style."""
 
-    def __init__(self) -> None:
-        super().__init__()
-        self._key_text: Text | None = None
-        self.auto_links = False
+    def __init__(
+        self,
+        key: str,
+        key_display: str,
+        description: str,
+        action: str,
+        disabled: bool = False,
+        tooltip: str = "",
+        classes="",
+    ) -> None:
+        self.key = key
+        self.key_display = key_display
+        self.description = description
+        self.action = action
+        self._disabled = disabled
+        if disabled:
+            classes += " -disabled"
+        super().__init__(classes=classes)
+        self.set_reactive(Widget.shrink, False)
+        if tooltip:
+            self.tooltip = tooltip
 
-    async def watch_highlight_key(self) -> None:
-        """If highlight key changes we need to regenerate the text."""
-        self._key_text = None
-        self.refresh()
+    def render(self) -> Text:
+        key_style = self.get_component_rich_style("footer-key--key")
+        description_style = self.get_component_rich_style("footer-key--description")
+        key_display = self.key_display
+        key_padding = self.get_component_styles("footer-key--key").padding
+        description_padding = self.get_component_styles(
+            "footer-key--description"
+        ).padding
 
-    def _on_mount(self, _: events.Mount) -> None:
-        self.watch(self.screen, "focused", self._bindings_changed)
-        self.watch(self.screen, "stack_updates", self._bindings_changed)
+        description = self.description
+        if description:
+            label_text = Text.assemble(
+                (
+                    " " * key_padding.left + key_display + " " * key_padding.right,
+                    key_style,
+                ),
+                (
+                    " " * description_padding.left
+                    + description
+                    + " " * description_padding.right,
+                    description_style,
+                ),
+            )
+        else:
+            label_text = Text.assemble((key_display, key_style))
 
-    def _bindings_changed(self, _: Widget | None) -> None:
-        self._key_text = None
-        self.refresh()
+        label_text.stylize_before(self.rich_style)
+        return label_text
 
-    def _on_mouse_move(self, event: events.MouseMove) -> None:
-        """Store any key we are moving over."""
-        self.highlight_key = event.style.meta.get("key")
+    def on_mouse_down(self) -> None:
+        if self._disabled:
+            self.app.bell()
+        else:
+            self.app.simulate_key(self.key)
 
-    def _on_leave(self, _: events.Leave) -> None:
-        """Clear any highlight when the mouse leaves the widget"""
-        self.highlight_key = None
+    def _watch_compact(self, compact: bool) -> None:
+        self.set_class(compact, "-compact")
 
-    def __rich_repr__(self) -> rich.repr.Result:
-        yield from super().__rich_repr__()
 
-    def _make_key_text(self) -> Text:
-        """Create text containing all the keys."""
-        base_style = self.rich_style
-        text = Text(
-            style=self.rich_style,
-            no_wrap=True,
-            overflow="ellipsis",
-            justify="left",
-            end="",
+class FooterLabel(Label):
+    """Text displayed in the footer (used by binding groups)."""
+
+
+@rich.repr.auto
+class Footer(ScrollableContainer, can_focus=False, can_focus_children=False):
+    ALLOW_SELECT = False
+    DEFAULT_CSS = """
+    Footer {
+        layout: horizontal;        
+        color: $footer-foreground;
+        background: $footer-background;
+        dock: bottom;
+        height: 1;
+        scrollbar-size: 0 0;
+        &.-compact {
+            FooterLabel {
+                margin: 0;
+            }
+            FooterKey {
+                margin-right: 1;
+            }
+            FooterKey.-grouped {
+                margin: 0 1;            
+            }
+            FooterKey.-command-palette  {
+                padding-right: 0;
+            }
+        }
+        FooterKey.-command-palette  {
+            dock: right;
+            padding-right: 1;
+            border-left: vkey $foreground 20%;
+        }
+        HorizontalGroup.binding-group {            
+            width: auto;
+            height: 1;
+            layout: horizontal;
+        }
+        KeyGroup.-compact {            
+            FooterKey.-grouped {
+                margin: 0;
+            }
+            margin: 0 1 0 0;
+            padding-left: 1;
+        }
+
+        FooterKey.-grouped {
+            margin: 0 1;            
+        }
+        FooterLabel {
+            margin: 0 1 0 0;            
+            color: $footer-description-foreground;
+            background: $footer-description-background;
+        }
+
+       
+    }
+    """
+
+    compact = reactive(False, toggle_class="-compact")
+    """Display in compact style."""
+    _bindings_ready = reactive(False, repaint=False)
+    """True if the bindings are ready to be displayed."""
+    show_command_palette = reactive(True)
+    """Show the key to invoke the command palette."""
+    combine_groups = reactive(True)
+    """Combine bindings in the same group?"""
+
+    def __init__(
+        self,
+        *children: Widget,
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None,
+        disabled: bool = False,
+        show_command_palette: bool = True,
+        compact: bool = False,
+    ) -> None:
+        """A footer to show key bindings.
+
+        Args:
+            *children: Child widgets.
+            name: The name of the widget.
+            id: The ID of the widget in the DOM.
+            classes: The CSS classes for the widget.
+            disabled: Whether the widget is disabled or not.
+            show_command_palette: Show key binding to invoke the command palette, on the right of the footer.
+            compact: Display a compact style (less whitespace) footer.
+        """
+        super().__init__(
+            *children,
+            name=name,
+            id=id,
+            classes=classes,
+            disabled=disabled,
         )
-        highlight_style = self.get_component_rich_style("footer--highlight")
-        highlight_key_style = self.get_component_rich_style("footer--highlight-key")
-        key_style = self.get_component_rich_style("footer--key")
-        description_style = self.get_component_rich_style("footer--description")
+        self.set_reactive(Footer.show_command_palette, show_command_palette)
+        self.set_reactive(Footer.compact, compact)
+        self.set_class(compact, "-compact", update=False)
 
+    def compose(self) -> ComposeResult:
+        if not self._bindings_ready:
+            return
+        active_bindings = self.screen.active_bindings
         bindings = [
-            binding
-            for (_, binding) in self.app.namespace_bindings.values()
+            (binding, enabled, tooltip)
+            for (_, binding, enabled, tooltip) in active_bindings.values()
             if binding.show
         ]
-
+        action_to_bindings: defaultdict[str, list[tuple[Binding, bool, str]]]
         action_to_bindings = defaultdict(list)
-        for binding in bindings:
-            action_to_bindings[binding.action].append(binding)
+        for binding, enabled, tooltip in bindings:
+            action_to_bindings[binding.action].append((binding, enabled, tooltip))
 
-        for _, bindings in action_to_bindings.items():
-            binding = bindings[0]
-            if binding.key_display is None:
-                key_display = self.app.get_key_display(binding.key)
-                if key_display is None:
-                    key_display = binding.key.upper()
+        self.styles.grid_size_columns = len(action_to_bindings)
+
+        for group, multi_bindings_iterable in groupby(
+            action_to_bindings.values(),
+            lambda multi_bindings_: multi_bindings_[0][0].group,
+        ):
+            multi_bindings = list(multi_bindings_iterable)
+            if group is not None and len(multi_bindings) > 1:
+                with KeyGroup(classes="-compact" if group.compact else ""):
+                    for multi_bindings in multi_bindings:
+                        binding, enabled, tooltip = multi_bindings[0]
+                        yield FooterKey(
+                            binding.key,
+                            self.app.get_key_display(binding),
+                            "",
+                            binding.action,
+                            disabled=not enabled,
+                            tooltip=tooltip or binding.description,
+                            classes="-grouped",
+                        ).data_bind(compact=Footer.compact)
+                yield FooterLabel(group.description)
             else:
-                key_display = binding.key_display
-            hovered = self.highlight_key == binding.key
-            key_text = Text.assemble(
-                (f" {key_display} ", highlight_key_style if hovered else key_style),
-                (
-                    f" {binding.description} ",
-                    highlight_style if hovered else base_style + description_style,
-                ),
-                meta={
-                    "@click": f"app.check_bindings('{binding.key}')",
-                    "key": binding.key,
-                },
-            )
-            text.append_text(key_text)
-        return text
+                for multi_bindings in multi_bindings:
+                    binding, enabled, tooltip = multi_bindings[0]
+                    yield FooterKey(
+                        binding.key,
+                        self.app.get_key_display(binding),
+                        binding.description,
+                        binding.action,
+                        disabled=not enabled,
+                        tooltip=tooltip,
+                    ).data_bind(compact=Footer.compact)
+        if self.show_command_palette and self.app.ENABLE_COMMAND_PALETTE:
+            try:
+                _node, binding, enabled, tooltip = active_bindings[
+                    self.app.COMMAND_PALETTE_BINDING
+                ]
+            except KeyError:
+                pass
+            else:
+                yield FooterKey(
+                    binding.key,
+                    self.app.get_key_display(binding),
+                    binding.description,
+                    binding.action,
+                    classes="-command-palette",
+                    disabled=not enabled,
+                    tooltip=binding.tooltip or binding.description,
+                )
 
-    def notify_style_update(self) -> None:
-        self._key_text = None
+    def bindings_changed(self, screen: Screen) -> None:
+        self._bindings_ready = True
+        if not screen.app.app_focus:
+            return
+        if self.is_attached and screen is self.screen:
+            self.call_after_refresh(self.recompose)
 
-    def post_render(self, renderable):
-        return renderable
+    def _on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
+        if self.allow_horizontal_scroll:
+            self.release_anchor()
+            if self._scroll_right_for_pointer(animate=True):
+                event.stop()
+                event.prevent_default()
 
-    def render(self) -> RenderableType:
-        if self._key_text is None:
-            self._key_text = self._make_key_text()
-        return self._key_text
+    def _on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+        if self.allow_horizontal_scroll:
+            self.release_anchor()
+            if self._scroll_left_for_pointer(animate=True):
+                event.stop()
+                event.prevent_default()
+
+    def on_mount(self) -> None:
+        self.screen.bindings_updated_signal.subscribe(self, self.bindings_changed)
+
+    def on_unmount(self) -> None:
+        self.screen.bindings_updated_signal.unsubscribe(self)

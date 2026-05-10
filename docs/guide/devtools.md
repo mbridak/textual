@@ -59,6 +59,45 @@ For instance, the following will run the `textual colors` command:
 textual run -c textual colors
 ```
 
+## Serve
+
+The devtools can also serve your application in a browser.
+Effectively turning your terminal app into a web application!
+
+The `serve` sub-command is similar to `run`. Here's how you can serve an app launched from a Python file:
+
+```
+textual serve my_app.py
+```
+
+You can also serve a Textual app launched via a command. Here's an example:
+
+```
+textual serve "textual keys"
+```
+
+The syntax for launching an app in a module is slightly different from `run`.
+You need to specify the full command, including `python`.
+Here's how you would run the Textual demo:
+
+```
+textual serve "python -m textual"
+```
+
+Textual's builtin web-server is quite powerful.
+You can serve multiple instances of your application at once!
+
+!!! tip
+
+    Textual serve is also useful when developing your app.
+    If you make changes to your code, simply refresh the browser to update.
+
+There are some additional switches for serving Textual apps. Run the following for a list:
+
+```
+textual serve --help
+```
+
 ## Live editing
 
 If you combine the `run` command with the `--dev` switch your app will run in *development mode*.
@@ -105,7 +144,7 @@ textual console -v
 
 ### Decreasing verbosity
 
-Log messages are classififed in to groups, and the `-x` flag can be used to **exclude** all message from a group. The groups are: `EVENT`, `DEBUG`, `INFO`, `WARNING`, `ERROR`, `PRINT`, `SYSTEM`, and `LOGGING`. The group a message belongs to is printed after its timestamp.
+Log messages are classififed into groups, and the `-x` flag can be used to **exclude** all message from a group. The groups are: `EVENT`, `DEBUG`, `INFO`, `WARNING`, `ERROR`, `PRINT`, `SYSTEM`, `LOGGING` and `WORKER`. The group a message belongs to is printed after its timestamp.
 
 Multiple groups may be excluded, for example to exclude everything except warning, errors, and `print` statements:
 

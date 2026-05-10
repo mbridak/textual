@@ -2,15 +2,23 @@ run := poetry run
 
 .PHONY: test
 test:
-	$(run) pytest --cov-report term-missing --cov=textual tests/ -vv
+	$(run) pytest tests/ -n 16 --dist=loadgroup $(ARGS)
 
-.PHONY: unit-test
-unit-test:
-	$(run) pytest --cov-report term-missing --cov=textual tests/ -vv -m "not integration_test"
+.PHONY: testv
+testv:
+	$(run) pytest tests/ -vvv -n 16 --dist=loadgroup $(ARGS)
 
 .PHONY: test-snapshot-update
 test-snapshot-update:
-	$(run) pytest --cov-report term-missing --cov=textual tests/ -vv --snapshot-update
+	$(run) pytest tests/ --snapshot-update -n 16 --dist=loadgroup $(ARGS)
+
+.PHONY: test-coverage
+test-coverage:
+	$(run) pytest tests/ --cov-report term-missing --cov=textual -n 16 --dist=loadgroup $(ARGS)
+
+.PHONY: coverage
+coverage:
+	$(run) coverage html
 
 .PHONY: typecheck
 typecheck:
@@ -28,6 +36,10 @@ format-check:
 clean-screenshot-cache:
 	rm -rf .screenshot_cache
 
+.PHONY: faq
+faq:
+	$(run) faqtory build
+
 .PHONY: docs-offline-nav
 docs-offline-nav:
 	echo "INHERIT: mkdocs-offline.yml" > mkdocs-nav-offline.yml
@@ -40,7 +52,7 @@ docs-online-nav:
 
 .PHONY: docs-serve
 docs-serve: clean-screenshot-cache docs-online-nav
-	$(run) mkdocs serve --config-file mkdocs-nav-online.yml
+	TEXTUAL_THEME=dracula $(run) mkdocs serve --config-file mkdocs-nav-online.yml
 	rm -f mkdocs-nav-online.yml
 
 .PHONY: docs-serve-offline
@@ -64,12 +76,8 @@ clean-offline-docs:
 
 .PHONY: docs-deploy
 docs-deploy: clean-screenshot-cache docs-online-nav
-	$(run) mkdocs gh-deploy --config-file mkdocs-nav-online.yml
+	TEXTUAL_THEME=dracula $(run) mkdocs gh-deploy --config-file mkdocs-nav-online.yml
 	rm -f mkdocs-nav-online.yml
-
-.PHONY: faq
-faq:
-	$(run) faqtory build
 
 .PHONY: build
 build: docs-build-offline
@@ -81,6 +89,7 @@ clean: clean-screenshot-cache clean-offline-docs
 .PHONY: setup
 setup:
 	poetry install
+	poetry install --extras syntax
 
 .PHONY: update
 update:
@@ -89,3 +98,11 @@ update:
 .PHONY: install-pre-commit
 install-pre-commit:
 	$(run) pre-commit install
+
+.PHONY: demo
+demo:
+	$(run) python -m textual
+
+.PHONY: repl
+repl:
+	$(run) python

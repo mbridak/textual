@@ -1,32 +1,32 @@
 from textual.app import App, ComposeResult
 from textual.widgets import Footer, Header, OptionList
-from textual.widgets.option_list import Option, Separator
+from textual.widgets.option_list import Option
 
 
 class OptionListApp(App[None]):
-    CSS_PATH = "option_list.css"
+    CSS_PATH = "option_list.tcss"
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield OptionList(
             Option("Aerilon", id="aer"),
             Option("Aquaria", id="aqu"),
-            Separator(),
+            None,
             Option("Canceron", id="can"),
             Option("Caprica", id="cap", disabled=True),
-            Separator(),
+            None,
             Option("Gemenon", id="gem"),
-            Separator(),
+            None,
             Option("Leonis", id="leo"),
             Option("Libran", id="lib"),
-            Separator(),
+            None,
             Option("Picon", id="pic"),
-            Separator(),
+            None,
             Option("Sagittaron", id="sag"),
             Option("Scorpia", id="sco"),
-            Separator(),
+            None,
             Option("Tauron", id="tau"),
-            Separator(),
+            None,
             Option("Virgon", id="vir"),
         )
         yield Footer()

@@ -21,7 +21,7 @@ A simple button with a variety of semantic styles.
 
 [Button reference](./widgets/button.md){ .md-button .md-button--primary }
 
-```{.textual path="docs/examples/widgets/button.py"}
+```{.textual path="docs/examples/widgets/button.py" columns="100" lines="24"}
 ```
 
 
@@ -32,6 +32,17 @@ A classic checkbox control.
 [Checkbox reference](./widgets/checkbox.md){ .md-button .md-button--primary }
 
 ```{.textual path="docs/examples/widgets/checkbox.py"}
+```
+
+
+## Collapsible
+
+Content that may be toggled on and off by clicking a title.
+
+[Collapsible reference](./widgets/collapsible.md){ .md-button .md-button--primary }
+
+
+```{.textual path="docs/examples/widgets/collapsible.py"}
 ```
 
 
@@ -52,6 +63,15 @@ A powerful data table, with configurable cursors.
 ```{.textual path="docs/examples/widgets/data_table.py"}
 ```
 
+## Digits
+
+Display numbers in tall characters.
+
+[Digits reference](./widgets/digits.md){ .md-button .md-button--primary }
+
+```{.textual path="docs/examples/widgets/digits.py"}
+```
+
 ## DirectoryTree
 
 A tree view of files and folders.
@@ -69,6 +89,7 @@ A footer to display and interact with key bindings.
 
 ```{.textual path="docs/examples/widgets/footer.py" columns="70" lines="12"}
 ```
+
 
 
 ## Header
@@ -98,6 +119,13 @@ A control to enter text.
 A simple text label.
 
 [Label reference](./widgets/label.md){ .md-button .md-button--primary }
+
+
+## Link
+
+A clickable link that opens a URL.
+
+[Link reference](./widgets/link.md){ .md-button .md-button--primary }
 
 
 ## ListView
@@ -134,7 +162,7 @@ Display and interact with a Markdown document (adds a table of contents and brow
 [MarkdownViewer reference](./widgets/markdown_viewer.md){ .md-button .md-button--primary }
 
 
-```{.textual path="docs/examples/widgets/markdown_viewer.py" columns="100" lines="42"}
+```{.textual path="docs/examples/widgets/markdown_viewer.py" columns="120" lines="50" press="tab,down"}
 ```
 
 ## Markdown
@@ -144,7 +172,17 @@ Display a markdown document.
 [Markdown reference](./widgets/markdown.md){ .md-button .md-button--primary }
 
 
-```{.textual path="docs/examples/widgets/markdown.py"}
+```{.textual path="docs/examples/widgets/markdown.py" columns="120" lines="53"}
+```
+
+## MaskedInput
+
+A control to enter input according to a template mask.
+
+[MaskedInput reference](./widgets/masked_input.md){ .md-button .md-button--primary }
+
+
+```{.textual path="docs/examples/widgets/masked_input.py"}
 ```
 
 ## OptionList
@@ -216,6 +254,16 @@ Display and update text in a scrolling panel.
 ```{.textual path="docs/examples/widgets/rich_log.py" press="H,i"}
 ```
 
+## Rule
+
+A rule widget to separate content, similar to a `<hr>` HTML tag.
+
+[Rule reference](./widgets/rule.md){ .md-button .md-button--primary }
+
+
+```{.textual path="docs/examples/widgets/horizontal_rules.py"}
+```
+
 ## Select
 
 Select from a number of possible options.
@@ -252,7 +300,7 @@ Displays simple static content. Typically used as a base class.
 
 ## Switch
 
-A on / off control, inspired by toggle buttons.
+An on / off control, inspired by toggle buttons.
 
 [Switch reference](./widgets/switch.md){ .md-button .md-button--primary }
 
@@ -278,6 +326,14 @@ A Combination of Tabs and ContentSwitcher to navigate static content.
 ```{.textual path="docs/examples/widgets/tabbed_content.py" press="j"}
 ```
 
+## TextArea
+
+A multi-line text area which supports syntax highlighting various languages.
+
+[TextArea reference](./widgets/text_area.md){ .md-button .md-button--primary }
+
+```{.textual path="docs/examples/widgets/text_area_example.py" columns="42" lines="8"}
+```
 
 ## Tree
 

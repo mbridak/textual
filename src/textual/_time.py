@@ -1,10 +1,9 @@
 import asyncio
-import platform
+import sys
 from asyncio import sleep as asyncio_sleep
 from time import monotonic, perf_counter
 
-PLATFORM = platform.system()
-WINDOWS = PLATFORM == "Windows"
+WINDOWS = sys.platform == "win32"
 
 
 if WINDOWS:
@@ -18,7 +17,7 @@ if WINDOWS:
     # Python3.11 is somewhat better, but this home-grown version beats it
     # Deduced from practical experiments
 
-    from ._win_sleep import sleep as win_sleep
+    from textual._win_sleep import sleep as win_sleep
 
     async def sleep(secs: float) -> None:
         """Sleep for a given number of seconds.

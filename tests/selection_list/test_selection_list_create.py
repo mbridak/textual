@@ -9,7 +9,6 @@ changed or wrapped in some way.
 from __future__ import annotations
 
 import pytest
-from rich.text import Text
 
 from textual.app import App, ComposeResult
 from textual.widgets import SelectionList
@@ -44,16 +43,16 @@ async def test_get_selection_by_index() -> None:
     async with SelectionListApp().run_test() as pilot:
         option_list = pilot.app.query_one(SelectionList)
         for n in range(5):
-            assert option_list.get_option_at_index(n).prompt == Text(str(n))
-        assert option_list.get_option_at_index(-1).prompt == Text("4")
+            assert str(option_list.get_option_at_index(n).prompt) == str(n)
+        assert str(option_list.get_option_at_index(-1).prompt) == "4"
 
 
 async def test_get_selection_by_id() -> None:
     """It should be possible to get a selection by ID."""
     async with SelectionListApp().run_test() as pilot:
         option_list = pilot.app.query_one(SelectionList)
-        assert option_list.get_option("3").prompt == Text("3")
-        assert option_list.get_option("4").prompt == Text("4")
+        assert str(option_list.get_option("3").prompt) == "3"
+        assert str(option_list.get_option("4").prompt) == "4"
 
 
 async def test_add_later() -> None:
@@ -98,3 +97,28 @@ async def test_add_non_selections() -> None:
             selections.add_option(("Nope",))
         with pytest.raises(SelectionError):
             selections.add_option(("Nope", 0, False, 23))
+
+
+async def test_clear_options() -> None:
+    """Clearing the options should also clear the selections."""
+    async with SelectionListApp().run_test() as pilot:
+        selections = pilot.app.query_one(SelectionList)
+        selections.clear_options()
+        assert selections.selected == []
+
+
+async def test_options_are_available_soon() -> None:
+    """Regression test for https://github.com/Textualize/textual/issues/3903."""
+
+    selection = Selection("", 0, id="some_id")
+    selection_list = SelectionList[int](selection)
+    assert selection_list.get_option("some_id") is selection
+
+
+async def test_removing_option_updates_indexes() -> None:
+    async with SelectionListApp().run_test() as pilot:
+        selections = pilot.app.query_one(SelectionList)
+        assert selections._values == {n: n for n in range(5)}
+
+        selections.remove_option_at_index(0)
+        assert selections._values == {n + 1: n for n in range(4)}

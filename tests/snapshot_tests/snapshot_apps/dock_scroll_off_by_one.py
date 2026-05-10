@@ -3,13 +3,15 @@ from textual.widgets import Checkbox, Footer
 
 
 class ScrollOffByOne(App):
+    AUTO_FOCUS = None
+
     def compose(self) -> ComposeResult:
         for number in range(1, 100):
             yield Checkbox(str(number))
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("Screen").scroll_end()
+        self.screen.scroll_end()
 
 
 app = ScrollOffByOne()

@@ -2,17 +2,17 @@
 
 Textual uses CSS to apply style to widgets. If you have any exposure to web development you will have encountered CSS, but don't worry if you haven't: this chapter will get you up to speed.
 
+!!! tip "VSCode User?"
+
+    The official [Textual CSS](https://marketplace.visualstudio.com/items?itemName=Textualize.textual-syntax-highlighter) extension adds syntax highlighting for both external files and inline CSS.
+
 ## Stylesheets
 
-CSS stands for _Cascading Stylesheets_. A stylesheet is a list of styles and rules about how those styles should be applied to a web page. In the case of Textual, the stylesheet applies [styles](./styles.md) to widgets, but otherwise it is the same idea.
-
-When Textual loads CSS it sets attributes on your widgets' `style` object. The effect is the same as if you had set attributes in Python.
-
-CSS is typically stored in an external file with the extension `.css` alongside your Python code.
+CSS stands for _Cascading Stylesheet_. A stylesheet is a list of styles and rules about how those styles should be applied to a web page. In the case of Textual, the stylesheet applies [styles](./styles.md) to widgets, but otherwise it is the same idea.
 
 Let's look at some Textual CSS.
 
-```sass
+```css
 Header {
   dock: top;
   height: 3;
@@ -26,7 +26,7 @@ This is an example of a CSS _rule set_. There may be many such sections in any g
 
 Let's break this CSS code down a bit.
 
-```sass hl_lines="1"
+```css hl_lines="1"
 Header {
   dock: top;
   height: 3;
@@ -38,7 +38,7 @@ Header {
 
 The first line is a _selector_ which tells Textual which widget(s) to modify. In the above example, the styles will be applied to a widget defined by the Python class `Header`.
 
-```sass hl_lines="2 3 4 5 6"
+```css hl_lines="2 3 4 5 6"
 Header {
   dock: top;
   height: 3;
@@ -51,6 +51,7 @@ Header {
 The lines inside the curly braces contains CSS _rules_, which consist of a rule name and rule value separated by a colon and ending in a semicolon. Such rules are typically written one per line, but you could add additional rules as long as they are separated by semicolons.
 
 The first rule in the above example reads `"dock: top;"`. The rule name is `dock` which tells Textual to place the widget on an edge of the screen. The text after the colon is `top` which tells Textual to dock to the _top_ of the screen. Other valid values for `dock` are "right", "bottom", or "left"; but "top" is most appropriate for a header.
+
 
 ## The DOM
 
@@ -99,7 +100,7 @@ With a header and a footer widget the DOM looks like this:
 --8<-- "docs/images/dom2.excalidraw.svg"
 </div>
 
-!!! note
+!!! note "What we didn't show"
 
     We've simplified the above example somewhat. Both the Header and Footer widgets contain children of their own. When building an app with pre-built widgets you rarely need to know how they are constructed unless you plan on changing the styles of individual components.
 
@@ -107,18 +108,17 @@ Both Header and Footer are children of the Screen object.
 
 To further explore the DOM, we're going to build a simple dialog with a question and two buttons. To do this we're going to import and use a few more builtin widgets:
 
-- `textual.layout.Container` For our top-level dialog.
-- `textual.layout.Horizontal` To arrange widgets left to right.
-- `textual.widgets.Static` For simple content.
-- `textual.widgets.Button` For a clickable button.
+- [`textual.containers.Container`][textual.containers.Container] For our top-level dialog.
+- [`textual.containers.Horizontal`][textual.containers.Horizontal] To arrange widgets left to right.
+- [`textual.widgets.Static`][textual.widgets.Static] For simple content.
+- [`textual.widgets.Button`][textual.widgets.Button] For a clickable button.
 
-=== "dom3.py"
 
-    ```python hl_lines="12 13 14 15 16 17 18 19 20"
-    --8<-- "docs/examples/guide/dom3.py"
-    ```
+```python hl_lines="12 13 14 15 16 17 18 19 20" title="dom3.py"
+--8<-- "docs/examples/guide/dom3.py"
+```
 
-We've added a Container to our DOM which (as the name suggests) is a container for other widgets. The container has a number of other widgets passed as positional arguments which will be added as the children of the container. Not all widgets accept child widgets in this way. A Button widget doesn't require any children, for example.
+We've added a Container to our DOM which (as the name suggests) contains other widgets. The container has a number of other widgets passed as positional arguments which will be added as the children of the container. Not all widgets accept child widgets in this way. A Button widget doesn't require any children, for example.
 
 Here's the DOM created by the above code:
 
@@ -138,7 +138,13 @@ You may recognize some elements in the above screenshot, but it doesn't quite lo
 
 To add a stylesheet set the `CSS_PATH` classvar to a relative path:
 
-```python hl_lines="9"
+
+!!! note "What are TCSS files?"
+
+    Textual CSS files are typically given the extension `.tcss` to differentiate them from browser CSS (`.css`).
+
+
+```python hl_lines="9" title="dom4.py"
 --8<-- "docs/examples/guide/dom4.py"
 ```
 
@@ -147,8 +153,8 @@ These are used by the CSS to identify parts of the DOM. We will cover these in t
 
 Here's the CSS file we are applying:
 
-```sass
---8<-- "docs/examples/guide/dom4.css"
+```css title="dom4.tcss"
+--8<-- "docs/examples/guide/dom4.tcss"
 ```
 
 The CSS contains a number of rule sets with a selector and a list of rules. You can also add comments with text between `/*` and `*/` which will be ignored by Textual. Add comments to leave yourself reminders or to temporarily disable selectors.
@@ -189,37 +195,42 @@ Let's look at the selectors supported by Textual CSS.
 
 ### Type selector
 
-The _type_ selector matches the name of the (Python) class. For example, the following widget can be matched with a `Button` selector:
+The _type_ selector matches the name of the (Python) class.
+Consider the following widget class:
 
 ```python
 from textual.widgets import Static
 
-class Button(Static):
+class Alert(Static):
     pass
 ```
 
-The following rule applies a border to this widget:
+Alert widgets may be styled with the following CSS (to give them a red border):
 
-```sass
-Button {
-  border: solid blue;
+```css
+Alert {
+  border: solid red;
 }
 ```
 
-The type selector will also match a widget's base classes. Consequently, a `Static` selector will also style the button because the `Button` Python class extends `Static`.
+The type selector will also match a widget's base classes.
+Consequently, a `Static` selector will also style the button because the `Alert` (Python) class extends `Static`.
 
-```sass
+```css
 Static {
   background: blue;
-  border: rounded white;
+  border: round green;
 }
 ```
 
-!!! note
+!!! note "This is different to browser CSS"
 
     The fact that the type selector matches base classes is a departure from browser CSS which doesn't have the same concept.
 
-You may have noticed that the `border` rule exists in both Static and Button. When this happens, Textual will use the most recently defined sub-class within a list of bases. So Button wins over Static, and Static wins over Widget (the base class of all widgets). Hence if both rules were in a stylesheet, the buttons would be "solid blue" and not "rounded white".
+You may have noticed that the `border` rule exists in both `Static` and `Alert`.
+When this happens, Textual will use the most recently defined sub-class.
+So `Alert` wins over `Static`, and `Static` wins over `Widget` (the base class of all widgets).
+Hence if both rules were in a stylesheet, `Alert` widgets would have a "solid red" border and not a "round green" border.
 
 ### ID selector
 
@@ -233,7 +244,7 @@ yield Button(id="next")
 
 You can match an ID with a selector starting with a hash (`#`). Here is how you might draw a red outline around the above button:
 
-```sass
+```css
 #next {
   outline: red;
 }
@@ -261,7 +272,7 @@ yield Button(classes="error disabled")
 
 To match a Widget with a given class in CSS you can precede the class name with a dot (`.`). Here's a rule with a class selector to match the `"success"` class name:
 
-```sass
+```css
 .success {
   background: green;
   color: white;
@@ -274,7 +285,7 @@ To match a Widget with a given class in CSS you can precede the class name with 
 
 Class name selectors may be _chained_ together by appending another full stop and class name. The selector will match a widget that has _all_ of the class names set. For instance, the following sets a red background on widgets that have both `error` _and_ `disabled` class names.
 
-```sass
+```css
 .error.disabled {
   background: darkred;
 }
@@ -286,6 +297,7 @@ Unlike the `id` attribute, a widget's classes can be changed after the widget wa
 - [remove_class()][textual.dom.DOMNode.remove_class] Removes class name(s) from a widget.
 - [toggle_class()][textual.dom.DOMNode.toggle_class] Removes a class name if it is present, or adds the name if it's not already present.
 - [has_class()][textual.dom.DOMNode.has_class] Checks if one or more classes are set on a widget.
+- [set_class()][textual.css.query.DOMQuery.set_class] Sets or removes a class dependant on a boolean.
 - [classes][textual.dom.DOMNode.classes] Is a frozen set of the class(es) set on a widget.
 
 
@@ -295,17 +307,29 @@ The _universal_ selector is denoted by an asterisk and will match _all_ widgets.
 
 For example, the following will draw a red outline around all widgets:
 
-```sass
+```css
 * {
   outline: solid red;
 }
 ```
 
+While it is rare to need to style all widgets, you can combine the universal selector with a parent, to select all children of that parent.
+
+For instance, here's how we would make all children of a `VerticalScroll` have a red background:
+
+```css
+VerticalScroll * {
+  background: red;
+}
+```
+
+See [Combinators](#combinators) for more details on combining selectors like this.
+
 ### Pseudo classes
 
 Pseudo classes can be used to match widgets in a particular state. Pseudo classes are set automatically by Textual. For instance, you might want a button to have a green background when the mouse cursor moves over it. We can do this with the `:hover` pseudo selector.
 
-```sass
+```css
 Button:hover {
   background: green;
 }
@@ -315,10 +339,21 @@ The `background: green` is only applied to the Button underneath the mouse curso
 
 Here are some other pseudo classes:
 
+- `:blur` Matches widgets which *do not* have input focus.
+- `:dark` Matches widgets in dark themes (where `App.theme.dark == True`).
 - `:disabled` Matches widgets which are in a disabled state.
+- `:empty` Matches widgets which have no displayed children.
 - `:enabled` Matches widgets which are in an enabled state.
+- `:even` Matches a widget at an evenly numbered position within its siblings.
+- `:first-child` Matches a widget that is the first amongst its siblings.
+- `:first-of-type` Matches a widget that is the first of its type amongst its siblings.
+- `:focus-within` Matches widgets with a focused child widget.
 - `:focus` Matches widgets which have input focus.
-- `:focus-within` Matches widgets with a focused a child widget.
+- `:inline` Matches widgets when the app is running in inline mode.
+- `:last-child` Matches a widget that is the last amongst its siblings.
+- `:last-of-type` Matches a widget that is the last of its type amongst its siblings.
+- `:light` Matches widgets in light themes (where `App.theme.dark == False`).
+- `:odd` Matches a widget at an oddly numbered position within its siblings.
 
 ## Combinators
 
@@ -336,7 +371,7 @@ Here's a section of DOM to illustrate this combinator:
 
 Let's say we want to make the text of the buttons in the dialog bold, but we _don't_ want to change the Button in the sidebar. We can do this with the following rule:
 
-```sass hl_lines="1"
+```css hl_lines="1"
 #dialog Button {
   text-style: bold;
 }
@@ -346,7 +381,7 @@ The `#dialog Button` selector matches all buttons that are below the widget with
 
 As with all selectors, you can combine as many as you wish. The following will match a `Button` that is under a `Horizontal` widget _and_ under a widget with an id of `"dialog"`:
 
-```sass
+```css
 #dialog Horizontal Button {
   text-style: bold;
 }
@@ -364,7 +399,7 @@ Let's use this to match the Button in the sidebar given the following DOM:
 
 We can use the following CSS to style all buttons which have a parent with an ID of `sidebar`:
 
-```sass
+```css
 #sidebar > Button {
   text-style: underline;
 }
@@ -384,13 +419,13 @@ It is possible that several selectors match a given widget. If the same style is
 
 The specificity rules are usually enough to fix any conflicts in your stylesheets. There is one last way of resolving conflicting selectors which applies to individual rules. If you add the text `!important` to the end of a rule then it will "win" regardless of the specificity.
 
-!!! warning
+!!! warning "If everything is Important, nothing is Important"
 
     Use `!important` sparingly (if at all) as it can make it difficult to modify your CSS in the future.
 
 Here's an example that makes buttons blue when hovered over with the mouse, regardless of any other selectors that match Buttons:
 
-```sass hl_lines="2"
+```css hl_lines="2"
 Button:hover {
   background: blue !important;
 }
@@ -402,14 +437,14 @@ You can define variables to reduce repetition and encourage consistency in your 
 Variables in Textual CSS are prefixed with `$`.
 Here's an example of how you might define a variable called `$border`:
 
-```sass
+```css
 $border: wide green;
 ```
 
 With our variable assigned, we can write `$border` and it will be substituted with `wide green`.
 Consider the following snippet:
 
-```sass
+```css
 #foo {
   border: $border;
 }
@@ -417,7 +452,7 @@ Consider the following snippet:
 
 This will be translated into:
 
-```sass
+```css
 #foo {
   border: wide green;
 }
@@ -426,7 +461,7 @@ This will be translated into:
 Variables allow us to define reusable styling in a single place.
 If we decide we want to change some aspect of our design in the future, we only have to update a single variable.
 
-!!! note
+!!! note "Where can variables be used?"
 
     Variables can only be used in the _values_ of a CSS declaration. You cannot, for example, refer to a variable inside a selector.
 
@@ -434,3 +469,129 @@ Variables can refer to other variables.
 Let's say we define a variable `$success: lime;`.
 Our `$border` variable could then be updated to `$border: wide $success;`, which will
 be translated to `$border: wide lime;`.
+
+## Initial value
+
+All CSS rules support a special value called `initial`, which will reset a value back to its default.
+
+Let's look at an example.
+The following will set the background of a button to green:
+
+```css
+Button {
+  background: green;
+}
+```
+
+If we want a specific button (or buttons) to use the default color, we can set the value to `initial`.
+For instance, if we have a widget with a (CSS) class called `dialog`, we could reset the background color of all buttons inside the dialog with the following CSS:
+
+```css
+.dialog Button {
+  background: initial;
+}
+```
+
+Note that `initial` will set the value back to the value defined in any [default css](./widgets.md#default-css).
+If you use `initial` within default css, it will treat the rule as completely unstyled.
+
+
+## Nesting CSS
+
+!!! tip "Added in version 0.47.0"
+
+CSS rule sets may be *nested*, i.e. they can contain other rule sets.
+When a rule set occurs within an existing rule set, it inherits the selector from the enclosing rule set.
+
+Let's put this into practical terms.
+The following example will display two boxes containing the text "Yes" and "No" respectively.
+These could eventually form the basis for buttons, but for this demonstration we are only interested in the CSS.
+
+=== "nesting01.tcss (no nesting)"
+
+    ```css
+    --8<-- "docs/examples/guide/css/nesting01.tcss"
+    ```
+
+=== "nesting01.py"
+
+    ```python
+    --8<-- "docs/examples/guide/css/nesting01.py"
+    ```
+
+=== "Output"
+
+    ```{.textual path="docs/examples/guide/css/nesting01.py"}
+    ```
+
+The CSS is quite straightforward; there is one rule for the container, one for all buttons, and one rule for each of the buttons.
+However it is easy to imagine this stylesheet growing more rules as we add features.
+
+Nesting allows us to group rule sets which have common selectors.
+In the example above, the rules all start with `#questions`.
+When we see a common prefix on the selectors, this is a good indication that we can use nesting.
+
+The following produces identical results to the previous example, but adds nesting of the rules.
+
+=== "nesting02.tcss (with nesting)"
+
+    ```css
+    --8<-- "docs/examples/guide/css/nesting02.tcss"
+    ```
+
+=== "nesting02.py"
+
+    ```python
+    --8<-- "docs/examples/guide/css/nesting02.py"
+    ```
+
+=== "Output"
+
+    ```{.textual path="docs/examples/guide/css/nesting02.py"}
+    ```
+
+!!! tip
+
+    Indenting the rule sets is not strictly required, but it does make it easier to understand how the rule sets are related to each other.
+
+In the first example we had a rule set that began with the selector `#questions .button`, which would match any widget with a class called "button" that is inside a container with id `questions`.
+
+In the second example, the button rule selector is simply `.button`, but it is *within* the rule set with selector `#questions`.
+The nesting means that the button rule set will inherit the selector from the outer rule set, so it is equivalent to `#questions .button`.
+
+### Nesting selector
+
+The two remaining rules are nested within the button rule, which means they will inherit their selectors from the button rule set *and* the outer `#questions` rule set.
+
+You may have noticed that the rules for the button styles contain a syntax we haven't seen before.
+The rule for the Yes button is `&.affirmative`.
+The ampersand (`&`) is known as the *nesting selector* and it tells Textual that the selector should be combined with the selector from the outer rule set.
+
+So `&.affirmative` in the example above, produces the equivalent of `#questions .button.affirmative` which selects a widget with both the `button` and `affirmative` classes.
+Without `&` it would be equivalent to `#questions .button .affirmative` (note the additional space) which would only match a widget with class `affirmative` inside a container with class `button`.
+
+
+For reference, lets see those two CSS files side-by-side:
+
+=== "nesting01.tcss"
+
+    ```css
+    --8<-- "docs/examples/guide/css/nesting01.tcss"
+    ```
+
+=== "nesting02.tcss"
+
+    ```sass
+    --8<-- "docs/examples/guide/css/nesting02.tcss"
+    ```
+
+
+Note how nesting bundles related rules together.
+If we were to add other selectors for additional screens or widgets, it would be easier to find the rules which will be applied.
+
+### Why use nesting?
+
+There is no requirement to use nested CSS, but grouping related rules together avoids repetition (in the nested CSS we only need to type `#questions` once, rather than four times in the non-nested CSS).
+
+Nesting CSS will also make rules that are *more* specific.
+This is useful if you find your rules are applying to widgets that you didn't intend.

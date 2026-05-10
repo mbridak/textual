@@ -1,40 +1,56 @@
 """
 
-A message pump is a base class for any object which processes messages, which includes Widget, Screen, and App.
+A `MessagePump` is a base class for any object which processes messages, which includes Widget, Screen, and App.
+
+!!! tip
+
+    Most of the method here are useful in general app development.
+
 """
+
 from __future__ import annotations
 
 import asyncio
-import inspect
 import threading
-from asyncio import CancelledError, Queue, QueueEmpty, Task
+from asyncio import CancelledError, QueueEmpty, Task, create_task
 from contextlib import contextmanager
 from functools import partial
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Generator, Iterable, cast
-from weakref import WeakSet
+from time import perf_counter
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Generator,
+    Iterable,
+    Type,
+    TypeVar,
+    cast,
+)
+from weakref import WeakSet, ref
 
-from . import Logger, events, log, messages
-from ._asyncio import create_task
-from ._callback import invoke
-from ._context import NoActiveAppError, active_app, active_message_pump
-from ._context import message_hook as message_hook_context_var
-from ._context import prevent_message_types_stack
-from ._on import OnNoWidget
-from ._time import time
-from ._types import CallbackType
-from .case import camel_to_snake
-from .css.match import match
-from .errors import DuplicateKeyHandlers
-from .events import Event
-from .message import Message
-from .reactive import Reactive, TooManyComputesError
-from .timer import Timer, TimerCallback
+from textual import Logger, events, log, messages
+from textual._callback import invoke
+from textual._compat import cached_property
+from textual._context import NoActiveAppError, active_app, active_message_pump
+from textual._context import message_hook as message_hook_context_var
+from textual._context import prevent_message_types_stack
+from textual._on import OnNoWidget
+from textual._queue import Queue
+from textual._time import time
+from textual.constants import SLOW_THRESHOLD
+from textual.css.match import match
+from textual.events import Event
+from textual.message import Message
+from textual.reactive import Reactive, TooManyComputesError
+from textual.signal import Signal
+from textual.timer import Timer, TimerCallback
 
 if TYPE_CHECKING:
     from typing_extensions import TypeAlias
 
-    from .app import App
-    from .css.model import SelectorSet
+    from textual.app import App
+    from textual.css.model import SelectorSet
 
 
 Callback: TypeAlias = "Callable[..., Any] | Callable[..., Awaitable[Any]]"
@@ -48,20 +64,21 @@ class MessagePumpClosed(Exception):
     pass
 
 
+_MessagePumpMetaSub = TypeVar("_MessagePumpMetaSub", bound="_MessagePumpMeta")
+
+
 class _MessagePumpMeta(type):
     """Metaclass for message pump. This exists to populate a Message inner class of a Widget with the
     parent classes' name.
     """
 
     def __new__(
-        cls,
+        cls: Type[_MessagePumpMetaSub],
         name: str,
         bases: tuple[type, ...],
         class_dict: dict[str, Any],
-        **kwargs,
-    ):
-        namespace = camel_to_snake(name)
-        isclass = inspect.isclass
+        **kwargs: Any,
+    ) -> _MessagePumpMetaSub:
         handlers: dict[
             type[Message], list[tuple[Callable, dict[str, tuple[SelectorSet, ...]]]]
         ] = class_dict.get("_decorated_handlers", {})
@@ -75,13 +92,6 @@ class _MessagePumpMeta(type):
                 ] = getattr(value, "_textual_on")
                 for message_type, selectors in textual_on:
                     handlers.setdefault(message_type, []).append((value, selectors))
-            if isclass(value) and issubclass(value, Message):
-                if "namespace" in value.__dict__:
-                    value.handler_name = f"on_{value.__dict__['namespace']}_{camel_to_snake(value.__name__)}"
-                else:
-                    value.handler_name = (
-                        f"on_{namespace}_{camel_to_snake(value.__name__)}"
-                    )
 
         # Look for reactives with public AND private compute methods.
         prefix = "compute_"
@@ -106,7 +116,6 @@ class MessagePump(metaclass=_MessagePumpMeta):
     """Base class which supplies a message pump."""
 
     def __init__(self, parent: MessagePump | None = None) -> None:
-        self._message_queue: Queue[Message | None] = Queue()
         self._parent = parent
         self._running: bool = False
         self._closing: bool = False
@@ -117,9 +126,39 @@ class MessagePump(metaclass=_MessagePumpMeta):
         self._timers: WeakSet[Timer] = WeakSet()
         self._last_idle: float = time()
         self._max_idle: float | None = None
-        self._mounted_event = asyncio.Event()
-        self._next_callbacks: list[CallbackType] = []
+        self._is_mounted = False
+        """Having this explicit Boolean is an optimization.
+
+        The same information could be retrieved from `self._mounted_event.is_set()`, but
+        we need to access this frequently in the compositor and the attribute with the
+        explicit Boolean value is faster than the two lookups and the function call.
+        """
+        self._next_callbacks: list[events.Callback] = []
         self._thread_id: int = threading.get_ident()
+        self._prevented_messages_on_mount = self._prevent_message_types_stack[-1]
+        self.message_signal: Signal[Message] = Signal(self, "messages")
+        """Subscribe to this signal to be notified of all messages sent to this widget.
+        
+        This is a fairly low-level mechanism, and shouldn't replace regular message handling.
+        
+        """
+
+    @property
+    def _parent(self) -> MessagePump | None:
+        """The current parent message pump (if set)."""
+        return None if self.__parent is None else self.__parent()
+
+    @_parent.setter
+    def _parent(self, parent: MessagePump | None) -> None:
+        self.__parent = None if parent is None else ref(parent)
+
+    @cached_property
+    def _message_queue(self) -> Queue[Message | None]:
+        return Queue()
+
+    @cached_property
+    def _mounted_event(self) -> asyncio.Event:
+        return asyncio.Event()
 
     @property
     def _prevent_message_types_stack(self) -> list[set[type[Message]]]:
@@ -130,6 +169,15 @@ class MessagePump(metaclass=_MessagePumpMeta):
             stack = [set()]
             prevent_message_types_stack.set(stack)
         return stack
+
+    def _thread_init(self):
+        """Initialize threading primitives for the current thread.
+
+        Require for Python3.8 https://github.com/Textualize/textual/issues/5845
+
+        """
+        self._message_queue
+        self._mounted_event
 
     def _get_prevented_messages(self) -> set[type[Message]]:
         """A set of all the prevented message types."""
@@ -179,35 +227,64 @@ class MessagePump(metaclass=_MessagePumpMeta):
         return self._parent is not None
 
     @property
-    def app(self) -> "App[object]":
-        """
-        Get the current app.
+    def message_queue_size(self) -> int:
+        """The current size of the message queue."""
+        return self._message_queue.qsize()
 
-        Returns:
-            The current app.
+    @property
+    def is_dom_root(self):
+        """Is this a root node (i.e. the App)?"""
+        return False
 
-        Raises:
-            NoActiveAppError: if no active app could be found for the current asyncio context
-        """
+    if TYPE_CHECKING:
+        from textual import getters
+
+        app = getters.app(App)
+    else:
+
+        @property
+        def app(self) -> "App[object]":
+            """
+            Get the current app.
+
+            Returns:
+                The current app.
+
+            Raises:
+                NoActiveAppError: if no active app could be found for the current asyncio context
+            """
+            try:
+                return active_app.get()
+            except LookupError:
+                from textual.app import App
+
+                node: MessagePump | None = self
+                while not isinstance(node, App):
+                    if node is None:
+                        raise NoActiveAppError()
+                    node = node._parent
+
+                return node
+
+    @property
+    def is_attached(self) -> bool:
+        """Is this node linked to the app through the DOM?"""
         try:
-            return active_app.get()
-        except LookupError:
-            from .app import App
-
-            node: MessagePump | None = self
-            while not isinstance(node, App):
-                if node is None:
-                    raise NoActiveAppError()
-                node = node._parent
-            active_app.set(node)
-            return node
+            if self.app._exit:
+                return False
+        except NoActiveAppError:
+            return False
+        node: MessagePump | None = self
+        while (node := node._parent) is not None:
+            if node.is_dom_root:
+                return True
+        return False
 
     @property
     def is_parent_active(self) -> bool:
         """Is the parent active?"""
-        return bool(
-            self._parent and not self._parent._closed and not self._parent._closing
-        )
+        parent = self._parent
+        return bool(parent is not None and not parent._closed and not parent._closing)
 
     @property
     def is_running(self) -> bool:
@@ -222,19 +299,6 @@ class MessagePump(metaclass=_MessagePumpMeta):
             A logger.
         """
         return self.app._logger
-
-    @property
-    def is_attached(self) -> bool:
-        """Is the node attached to the app via the DOM?"""
-        from .app import App
-
-        node = self
-
-        while not isinstance(node, App):
-            if node._parent is None:
-                return False
-            node = node._parent
-        return True
 
     def _attach(self, parent: MessagePump) -> None:
         """Set the parent, and therefore attach this node to the tree.
@@ -257,6 +321,7 @@ class MessagePump(metaclass=_MessagePumpMeta):
         Returns:
             `True` if the message will be sent, or `False` if it is disabled.
         """
+
         return type(message) not in self._disabled_messages
 
     def disable_messages(self, *messages: type[Message]) -> None:
@@ -318,10 +383,18 @@ class MessagePump(metaclass=_MessagePumpMeta):
         name: str | None = None,
         pause: bool = False,
     ) -> Timer:
-        """Make a function call after a delay.
+        """Call a function after a delay.
+
+        Example:
+            ```python
+            def ready():
+                self.notify("Your soft boiled egg is ready!")
+            # Call ready() after 3 minutes
+            self.set_timer(3 * 60, ready)
+            ```
 
         Args:
-            delay: Time to wait before invoking callback.
+            delay: Time (in seconds) to wait before invoking callback.
             callback: Callback to call after time has expired.
             name: Name of the timer (for debug).
             pause: Start timer paused.
@@ -329,11 +402,12 @@ class MessagePump(metaclass=_MessagePumpMeta):
         Returns:
             A timer object.
         """
+
         timer = Timer(
             self,
             delay,
             name=name or f"set_timer#{Timer._timer_count}",
-            callback=callback,
+            callback=None if callback is None else partial(self.call_next, callback),
             repeat=0,
             pause=pause,
         )
@@ -353,7 +427,7 @@ class MessagePump(metaclass=_MessagePumpMeta):
         """Call a function at periodic intervals.
 
         Args:
-            interval: Time between calls.
+            interval: Time (in seconds) between calls.
             callback: Function to call.
             name: Name of the timer object.
             repeat: Number of times to repeat the call or 0 for continuous.
@@ -392,6 +466,27 @@ class MessagePump(metaclass=_MessagePumpMeta):
         message = messages.InvokeLater(partial(callback, *args, **kwargs))
         return self.post_message(message)
 
+    async def wait_for_refresh(self) -> bool:
+        """Wait for the next refresh.
+
+        This method should only be called from a task other than the one running this widget.
+        If called from the same task, it will return immediately to avoid blocking the event loop.
+
+        Returns:
+            `True` if waiting for refresh was successful, or `False` if the call was a null-op
+                due to calling it within the node's own task.
+
+        """
+        assert (
+            self._task is not None
+        ), "Node must be running before calling wait_for_refresh"
+        if asyncio.current_task() is self._task:
+            return False
+        refreshed_event = asyncio.Event()
+        self.call_after_refresh(refreshed_event.set)
+        await refreshed_event.wait()
+        return True
+
     def call_later(self, callback: Callback, *args: Any, **kwargs: Any) -> bool:
         """Schedule a callback to run after all messages are processed in this object.
         Positional and keywords arguments are passed to the callable.
@@ -417,34 +512,29 @@ class MessagePump(metaclass=_MessagePumpMeta):
             *args: Positional arguments to pass to the callable.
             **kwargs: Keyword arguments to pass to the callable.
         """
-        self._next_callbacks.append(partial(callback, *args, **kwargs))
+        assert callback is not None, "Callback must not be None"
+        callback_message = events.Callback(callback=partial(callback, *args, **kwargs))
+        callback_message._prevent.update(self._get_prevented_messages())
+        self._next_callbacks.append(callback_message)
         self.check_idle()
 
     def _on_invoke_later(self, message: messages.InvokeLater) -> None:
         # Forward InvokeLater message to the Screen
-        self.app.screen._invoke_later(
-            message.callback, message._sender or active_message_pump.get()
-        )
-
-    def _close_messages_no_wait(self) -> None:
-        """Request the message queue to immediately exit."""
-        self._message_queue.put_nowait(messages.CloseMessages())
-
-    async def _on_close_messages(self, message: messages.CloseMessages) -> None:
-        await self._close_messages()
+        if self.app._running:
+            self.app.screen._invoke_later(
+                message.callback, message._sender or active_message_pump.get()
+            )
 
     async def _close_messages(self, wait: bool = True) -> None:
         """Close message queue, and optionally wait for queue to finish processing."""
         if self._closed or self._closing:
             return
         self._closing = True
-        stop_timers = list(self._timers)
-        for timer in stop_timers:
-            timer.stop()
-        self._timers.clear()
-        await self._message_queue.put(events.Unmount())
+        if self._timers:
+            await Timer._stop_all(self._timers)
+            self._timers.clear()
         Reactive._reset_object(self)
-        await self._message_queue.put(None)
+        self._message_queue.put_nowait(None)
         if wait and self._task is not None and asyncio.current_task() != self._task:
             try:
                 running_widget = active_message_pump.get()
@@ -452,10 +542,15 @@ class MessagePump(metaclass=_MessagePumpMeta):
                 running_widget = None
 
             if running_widget is None or running_widget is not self:
-                await self._task
+                try:
+                    await self._task
+                except CancelledError:
+                    pass
 
     def _start_messages(self) -> None:
         """Start messages task."""
+        self._thread_init()
+
         if self.app._running:
             self._task = create_task(
                 self._process_messages(), name=f"message pump {self}"
@@ -466,42 +561,81 @@ class MessagePump(metaclass=_MessagePumpMeta):
 
     async def _process_messages(self) -> None:
         self._running = True
-        active_message_pump.set(self)
 
-        await self._pre_process()
+        with self._context():
+            if not await self._pre_process():
+                self._running = False
+                return
 
-        try:
-            await self._process_messages_loop()
-        except CancelledError:
-            pass
-        finally:
-            self._running = False
-            for timer in list(self._timers):
-                timer.stop()
+            try:
+                await self._process_messages_loop()
+            except CancelledError:
+                pass
+            finally:
+                self._running = False
+                try:
+                    if self._timers:
+                        await Timer._stop_all(self._timers)
+                        self._timers.clear()
+                    Reactive._clear_watchers(self)
+                finally:
+                    await self._message_loop_exit()
+        self._task = None
 
-    async def _pre_process(self) -> None:
-        """Procedure to run before processing messages."""
+    async def _message_loop_exit(self) -> None:
+        """Called when the message loop has completed."""
+
+    async def _pre_process(self) -> bool:
+        """Procedure to run before processing messages.
+
+        Returns:
+            `True` if successful, or `False` if any exception occurred.
+
+        """
         # Dispatch compose and mount messages without going through loop
         # These events must occur in this order, and at the start.
+
         try:
             await self._dispatch_message(events.Compose())
-            await self._dispatch_message(events.Mount())
-            self.check_idle()
+            if self._prevented_messages_on_mount:
+                with self.prevent(*self._prevented_messages_on_mount):
+                    await self._dispatch_message(events.Mount())
+            else:
+                await self._dispatch_message(events.Mount())
             self._post_mount()
         except Exception as error:
             self.app._handle_exception(error)
+            return False
         finally:
             # This is critical, mount may be waiting
             self._mounted_event.set()
+            self._is_mounted = True
+        return True
 
     def _post_mount(self):
         """Called after the object has been mounted."""
+
+    def _close_messages_no_wait(self) -> None:
+        """Request the message queue to immediately exit."""
+        self._message_queue.put_nowait(messages.CloseMessages())
+
+    @contextmanager
+    def _context(self) -> Generator[None, None, None]:
+        """Context manager to set ContextVars."""
+        reset_token = active_message_pump.set(self)
+        try:
+            yield
+        finally:
+            active_message_pump.reset(reset_token)
+
+    async def _on_close_messages(self, message: messages.CloseMessages) -> None:
+        await self._close_messages()
 
     async def _process_messages_loop(self) -> None:
         """Process messages until the queue is closed."""
         _rich_traceback_guard = True
         self._thread_id = threading.get_ident()
-
+        await asyncio.sleep(0)
         while not self._closed:
             try:
                 message = await self._get_message()
@@ -531,9 +665,11 @@ class MessagePump(metaclass=_MessagePumpMeta):
                 raise
             except Exception as error:
                 self._mounted_event.set()
+                self._is_mounted = True
                 self.app._handle_exception(error)
                 break
             finally:
+                self.message_signal.publish(message)
                 self._message_queue.task_done()
 
                 current_time = time()
@@ -562,7 +698,8 @@ class MessagePump(metaclass=_MessagePumpMeta):
         self._next_callbacks.clear()
         for callback in callbacks:
             try:
-                await invoke(callback)
+                with self.prevent(*callback._prevent):
+                    await invoke(callback.callback)
             except Exception as error:
                 self.app._handle_exception(error)
                 break
@@ -588,6 +725,16 @@ class MessagePump(metaclass=_MessagePumpMeta):
             # Allow apps to treat events and messages separately
             if isinstance(message, Event):
                 await self.on_event(message)
+            elif "debug" in self.app.features:
+                start = perf_counter()
+                await self._on_message(message)
+                if perf_counter() - start > SLOW_THRESHOLD / 1000:
+                    log.warning(
+                        f"method=<{self.__class__.__name__}."
+                        f"{message.handler_name}>",
+                        f"Took over {SLOW_THRESHOLD}ms to process.",
+                        "\nTo avoid screen freezes, consider using a worker.",
+                    )
             else:
                 await self._on_message(message)
             if self._next_callbacks:
@@ -602,7 +749,7 @@ class MessagePump(metaclass=_MessagePumpMeta):
             method_name: Handler method name.
             message: Message object.
         """
-        from .widget import Widget
+        from textual.widget import Widget
 
         methods_dispatched: set[Callable] = set()
         message_mro = [
@@ -632,6 +779,8 @@ class MessagePump(metaclass=_MessagePumpMeta):
                                 continue
                             for attribute, selector in selectors.items():
                                 node = getattr(message, attribute)
+                                if node is None:
+                                    break
                                 if not isinstance(node, Widget):
                                     raise OnNoWidget(
                                         f"on decorator can't match against {attribute!r} as it is not a widget."
@@ -686,7 +835,7 @@ class MessagePump(metaclass=_MessagePumpMeta):
             if message._sender is not None and message._sender == self._parent:
                 # parent is sender, so we stop propagation after parent
                 message.stop()
-            if self.is_parent_active and not self._parent._closing:
+            if self.is_parent_active and self.is_attached:
                 message._bubble_to(self._parent)
 
     def check_idle(self) -> None:
@@ -715,9 +864,14 @@ class MessagePump(metaclass=_MessagePumpMeta):
             message: A message (including Event).
 
         Returns:
-            `True` if the messages was processed, `False` if it wasn't.
+            `True` if the message was queued for processing, otherwise `False`.
         """
         _rich_traceback_omit = True
+        if not hasattr(message, "_prevent"):
+            # Catch a common error (forgetting to call super)
+            raise RuntimeError(
+                "Message is missing attributes; did you forget to call super().__init__() ?"
+            )
         if self._closing or self._closed:
             return False
         if not self.check_message_enabled(message):
@@ -734,75 +888,33 @@ class MessagePump(metaclass=_MessagePumpMeta):
         return True
 
     async def on_callback(self, event: events.Callback) -> None:
+        if self.app._closing:
+            return
+        try:
+            self.app.screen
+        except Exception:
+            self.log.warning(
+                f"Not invoking timer callback {event.callback!r} because there is no screen."
+            )
+            return
         await invoke(event.callback)
 
-    # TODO: Does dispatch_key belong on message pump?
-    async def dispatch_key(self, event: events.Key) -> bool:
-        """Dispatch a key event to method.
-
-        This method will call the method named 'key_<event.key>' if it exists.
-        Some keys have aliases. The first alias found will be invoked if it exists.
-        If multiple handlers exist that match the key, an exception is raised.
-
-        Args:
-            event: A key event.
-
-        Returns:
-            True if key was handled, otherwise False.
-
-        Raises:
-            DuplicateKeyHandlers: When there's more than 1 handler that could handle this key.
-        """
-
-        def get_key_handler(pump: MessagePump, key: str) -> Callable | None:
-            """Look for the public and private handler methods by name on self."""
-            public_handler_name = f"key_{key}"
-            public_handler = getattr(pump, public_handler_name, None)
-
-            private_handler_name = f"_key_{key}"
-            private_handler = getattr(pump, private_handler_name, None)
-
-            return public_handler or private_handler
-
-        handled = False
-        invoked_method = None
-        key_name = event.name
-        if not key_name:
-            return False
-
-        for key_method_name in event.name_aliases:
-            key_method = get_key_handler(self, key_method_name)
-            if key_method is not None:
-                if invoked_method:
-                    _raise_duplicate_key_handlers_error(
-                        key_name, invoked_method.__name__, key_method.__name__
-                    )
-                # If key handlers return False, then they are not considered handled
-                # This allows key handlers to do some conditional logic
-                handled = (await invoke(key_method, event)) is not False
-                invoked_method = key_method
-
-        return handled
-
     async def on_timer(self, event: events.Timer) -> None:
+        if not self.app._running:
+            return
         event.prevent_default()
         event.stop()
         if event.callback is not None:
+            try:
+                self.app.screen
+            except Exception:
+                self.log.warning(
+                    f"Not invoking timer callback {event.callback!r} because there is no screen."
+                )
+                return
             try:
                 await invoke(event.callback)
             except Exception as error:
                 raise CallbackError(
                     f"unable to run callback {event.callback!r}; {error}"
                 )
-
-
-def _raise_duplicate_key_handlers_error(
-    key_name: str, first_handler: str, second_handler: str
-) -> None:
-    """Raise exception for case where user presses a key and there are multiple candidate key handler methods for it."""
-    raise DuplicateKeyHandlers(
-        f"Multiple handlers for key press {key_name!r}.\n"
-        f"We found both {first_handler!r} and {second_handler!r}, "
-        f"and didn't know which to call.\n"
-        f"Consider combining them into a single handler.",
-    )

@@ -6,12 +6,7 @@ import pytest
 
 from textual.app import App, ComposeResult
 from textual.widgets import OptionList
-from textual.widgets.option_list import (
-    DuplicateID,
-    Option,
-    OptionDoesNotExist,
-    Separator,
-)
+from textual.widgets.option_list import DuplicateID, Option, OptionDoesNotExist
 
 
 class OptionListApp(App[None]):
@@ -21,7 +16,7 @@ class OptionListApp(App[None]):
         yield OptionList(
             "0",
             Option("1"),
-            Separator(),
+            None,
             Option("2", disabled=True),
             None,
             Option("3", id="3"),
@@ -119,5 +114,55 @@ async def test_add_later() -> None:
 async def test_create_with_duplicate_id() -> None:
     """Adding an option with a duplicate ID should be an error."""
     async with OptionListApp().run_test() as pilot:
+        option_list = pilot.app.query_one(OptionList)
+        assert option_list.option_count == 5
         with pytest.raises(DuplicateID):
-            pilot.app.query_one(OptionList).add_option(Option("dupe", id="3"))
+            option_list.add_option(Option("dupe", id="3"))
+        assert option_list.option_count == 5
+
+
+async def test_create_with_duplicate_id_and_subsequent_non_dupes() -> None:
+    """Adding an option with a duplicate ID should be an error."""
+    async with OptionListApp().run_test() as pilot:
+        option_list = pilot.app.query_one(OptionList)
+        assert option_list.option_count == 5
+        with pytest.raises(DuplicateID):
+            option_list.add_option(Option("dupe", id="3"))
+        assert option_list.option_count == 5
+        option_list.add_option(Option("Not a dupe", id="6"))
+        assert option_list.option_count == 6
+        option_list.add_option(Option("Not a dupe", id="7"))
+        assert option_list.option_count == 7
+
+
+async def test_adding_multiple_duplicates_at_once() -> None:
+    """Adding duplicates together than aren't existing duplicates should be an error."""
+    async with OptionListApp().run_test() as pilot:
+        option_list = pilot.app.query_one(OptionList)
+        assert option_list.option_count == 5
+        with pytest.raises(DuplicateID):
+            option_list.add_options(
+                [
+                    Option("dupe", id="42"),
+                    Option("dupe", id="42"),
+                ]
+            )
+        assert option_list.option_count == 5
+
+
+async def test_options_are_available_soon() -> None:
+    """Regression test for https://github.com/Textualize/textual/issues/3903."""
+
+    option = Option("", id="some_id")
+    option_list = OptionList(option)
+    assert option_list.get_option("some_id") is option
+
+
+async def test_set_options():
+    """Test set_options method."""
+    async with OptionListApp().run_test() as pilot:
+        option_list = pilot.app.query_one(OptionList)
+        option_list.set_options(["foo", "bar"])
+        assert option_list.option_count == 2
+        assert option_list.get_option_at_index(0).prompt == "foo"
+        assert option_list.get_option_at_index(1).prompt == "bar"

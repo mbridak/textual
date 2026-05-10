@@ -1,20 +1,22 @@
 """
-
-A DOMNode is a base class for any object within the Textual Document Object Model,
+The module contains `DOMNode`, the base class for any object within the Textual Document Object Model,
 which includes all Widgets, Screens, and Apps.
-"""
 
+"""
 
 from __future__ import annotations
 
 import re
-from functools import lru_cache
+import threading
+from functools import lru_cache, partial
 from inspect import getfile
 from typing import (
     TYPE_CHECKING,
+    Any,
     Callable,
     ClassVar,
     Iterable,
+    Mapping,
     Sequence,
     Type,
     TypeVar,
@@ -24,40 +26,45 @@ from typing import (
 
 import rich.repr
 from rich.highlighter import ReprHighlighter
-from rich.pretty import Pretty
+from rich.style import NULL_STYLE as RICH_NULL_STYLE
 from rich.style import Style
 from rich.text import Text
 from rich.tree import Tree
 
-from ._context import NoActiveAppError
-from ._node_list import NodeList
-from ._types import WatchCallbackType
-from ._worker_manager import WorkerManager
-from .binding import Binding, BindingType, _Bindings
-from .color import BLACK, WHITE, Color
-from .css._error_tools import friendly_list
-from .css.constants import VALID_DISPLAY, VALID_VISIBILITY
-from .css.errors import DeclarationError, StyleValueError
-from .css.parse import parse_declarations
-from .css.styles import RenderStyles, Styles
-from .css.tokenize import IDENTIFIER
-from .message_pump import MessagePump
-from .reactive import Reactive, _watch
-from .timer import Timer
-from .walk import walk_breadth_first, walk_depth_first
+from textual._context import NoActiveAppError, active_message_pump
+from textual._node_list import NodeList
+from textual._types import WatchCallbackType
+from textual.binding import Binding, BindingsMap, BindingType
+from textual.cache import LRUCache
+from textual.color import BLACK, WHITE, Color
+from textual.css._error_tools import friendly_list
+from textual.css.constants import VALID_DISPLAY, VALID_VISIBILITY
+from textual.css.errors import DeclarationError, StyleValueError
+from textual.css.match import match
+from textual.css.parse import is_id_selector, parse_declarations, parse_selectors
+from textual.css.query import InvalidQueryFormat, NoMatches, TooManyMatches, WrongType
+from textual.css.styles import RenderStyles, Styles
+from textual.css.tokenize import IDENTIFIER
+from textual.css.tokenizer import TokenError
+from textual.message_pump import MessagePump
+from textual.reactive import Reactive, ReactiveError, _Mutated, _watch
+from textual.style import Style as VisualStyle
+from textual.timer import Timer
+from textual.walk import walk_breadth_first, walk_breadth_search_id, walk_depth_first
+from textual.worker_manager import WorkerManager
 
 if TYPE_CHECKING:
-    from rich.console import RenderableType
-    from .app import App
-    from .css.query import DOMQuery, QueryType
-    from .message import Message
-    from .screen import Screen
-    from .widget import Widget
-    from .worker import Worker, WorkType, ResultType
     from typing_extensions import Self, TypeAlias
+    from _typeshed import SupportsRichComparison
 
-    # Unused & ignored imports are needed for the docs to link to these objects:
-    from .css.query import NoMatches, TooManyMatches, WrongType  # type: ignore  # noqa: F401
+    from rich.console import RenderableType
+    from textual.app import App
+    from textual.css.query import DOMQuery, QueryType
+    from textual.css.types import CSSLocation
+    from textual.message import Message
+    from textual.screen import Screen
+    from textual.widget import Widget
+    from textual.worker import Worker, WorkType, ResultType
 
 from typing_extensions import Literal
 
@@ -66,6 +73,13 @@ _re_identifier = re.compile(IDENTIFIER)
 
 WalkMethod: TypeAlias = Literal["depth", "breadth"]
 """Valid walking methods for the [`DOMNode.walk_children` method][textual.dom.DOMNode.walk_children]."""
+
+
+ReactiveType = TypeVar("ReactiveType")
+
+
+QueryOneCacheKey: TypeAlias = "tuple[int, str, Type[Widget] | None]"
+"""The key used to cache query_one results."""
 
 
 class BadIdentifier(Exception):
@@ -79,7 +93,7 @@ def check_identifiers(description: str, *names: str) -> None:
         description: Description of where identifier is used for error message.
         *names: Identifiers to check.
     """
-    match = _re_identifier.match
+    match = _re_identifier.fullmatch
     for name in names:
         if match(name) is None:
             raise BadIdentifier(
@@ -112,25 +126,36 @@ class _ClassesDescriptor:
         else:
             class_names = set(classes)
         check_identifiers("class name", *class_names)
-        obj._classes = class_names
-        obj._update_styles()
+        if obj._classes != class_names:
+            obj._classes = class_names
+            obj.update_node_styles()
 
 
 @rich.repr.auto
 class DOMNode(MessagePump):
     """The base class for object that can be in the Textual DOM (App and Widget)"""
 
-    # CSS defaults
     DEFAULT_CSS: ClassVar[str] = ""
+    """Default TCSS."""
 
-    # Default classes argument if not supplied
-    DEFAULT_CLASSES: str = ""
+    DEFAULT_CLASSES: ClassVar[str] = ""
+    """Default classes argument if not supplied."""
 
-    # Virtual DOM nodes
     COMPONENT_CLASSES: ClassVar[set[str]] = set()
+    """Virtual DOM nodes, used to expose styles to line API widgets."""
 
-    # Mapping of key bindings
+    BINDING_GROUP_TITLE: str | None = None
+    """Title of widget used where bindings are displayed (such as in the key panel)."""
+
     BINDINGS: ClassVar[list[BindingType]] = []
+    """A list of key bindings."""
+
+    # Indicates if the CSS should be automatically scoped
+    SCOPED_CSS: ClassVar[bool] = True
+    """Should default css be limited to the widget type?"""
+
+    HELP: ClassVar[str | None] = None
+    """Optional help text shown in help panel (Markdown format)."""
 
     # True if this node inherits the CSS from the base class.
     _inherit_css: ClassVar[bool] = True
@@ -144,12 +169,21 @@ class DOMNode(MessagePump):
     # List of names of base classes that inherit CSS
     _css_type_names: ClassVar[frozenset[str]] = frozenset()
 
+    # Name of the widget in CSS
+    _css_type_name: str = ""
+
     # Generated list of bindings
-    _merged_bindings: ClassVar[_Bindings | None] = None
+    _merged_bindings: ClassVar[BindingsMap | None] = None
 
     _reactives: ClassVar[dict[str, Reactive]]
 
     _decorated_handlers: dict[type[Message], list[tuple[Callable, str | None]]]
+
+    # Names of potential computed reactives
+    _computes: ClassVar[frozenset[str]]
+
+    _PSEUDO_CLASSES: ClassVar[dict[str, Callable[[App[Any]], bool]]] = {}
+    """Pseudo class checks."""
 
     def __init__(
         self,
@@ -158,17 +192,18 @@ class DOMNode(MessagePump):
         id: str | None = None,
         classes: str | None = None,
     ) -> None:
-        self._classes = set()
+        self._classes: set[str] = set()
         self._name = name
         self._id = None
         if id is not None:
-            self.id = id
+            check_identifiers("id", id)
+            self._id = id
 
         _classes = classes.split() if classes else []
         check_identifiers("class name", *_classes)
         self._classes.update(_classes)
 
-        self._nodes: NodeList = NodeList()
+        self._nodes: NodeList = NodeList(self)
         self._css_styles: Styles = Styles(self)
         self._inline_styles: Styles = Styles(self)
         self.styles: RenderStyles = RenderStyles(
@@ -181,14 +216,179 @@ class DOMNode(MessagePump):
         self._auto_refresh_timer: Timer | None = None
         self._css_types = {cls.__name__ for cls in self._css_bases(self.__class__)}
         self._bindings = (
-            _Bindings()
+            BindingsMap()
             if self._merged_bindings is None
             else self._merged_bindings.copy()
         )
         self._has_hover_style: bool = False
         self._has_focus_within: bool = False
+        self._has_order_style: bool = False
+        """The node has an ordered dependent pseudo-style (`:odd`, `:even`, `:first-of-type`, `:last-of-type`, `:first-child`, `:last-child`)"""
+        self._has_odd_or_even: bool = False
+        """The node has the pseudo class `odd` or `even`."""
+        self._reactive_connect: (
+            dict[str, tuple[MessagePump, Reactive[object] | object]] | None
+        ) = None
+        self._pruning = False
+        self._query_one_cache: LRUCache[QueryOneCacheKey, DOMNode] = LRUCache(1024)
+        self._trap_focus = False
 
         super().__init__()
+
+    def _get_dom_base(self) -> DOMNode:
+        """Get the DOM base node (typically self).
+
+        All DOM queries on this node will use the return value as the root node.
+        This method allows the App to query the default screen, and not the active screen.
+
+        Returns:
+            DOMNode.
+        """
+        return self
+
+    def set_reactive(
+        self, reactive: Reactive[ReactiveType], value: ReactiveType
+    ) -> None:
+        """Sets a reactive value *without* invoking validators or watchers.
+
+        Example:
+            ```python
+            self.set_reactive(App.theme, "textual-light")
+            ```
+
+        Args:
+            reactive: A reactive property (use the class scope syntax, i.e. `MyClass.my_reactive`).
+            value: New value of reactive.
+
+        Raises:
+            AttributeError: If the first argument is not a reactive.
+        """
+        name = reactive.name
+        if not isinstance(reactive, Reactive):
+            raise TypeError("A Reactive class is required; for example: MyApp.theme")
+        if name not in self._reactives:
+            raise AttributeError(
+                f"No reactive called {name!r}; Have you called super().__init__(...) in the {self.__class__.__name__} constructor?"
+            )
+        setattr(self, f"_reactive_{name}", value)
+
+    def mutate_reactive(self, reactive: Reactive[ReactiveType]) -> None:
+        """Force an update to a mutable reactive.
+
+        Example:
+            ```python
+            self.reactive_name_list.append("Jessica")
+            self.mutate_reactive(MyClass.reactive_name_list)
+            ```
+
+        Textual will automatically detect when a reactive is set to a new value, but it is unable
+        to detect if a value is _mutated_ (such as updating a list, dict, or attribute of an object).
+        If you do wish to use a collection or other mutable object in a reactive, then you can call
+        this method after your reactive is updated. This will ensure that all the reactive _superpowers_
+        work.
+
+        !!! note
+
+            This method will cause watchers to be called, even if the value hasn't changed.
+
+        Args:
+            reactive: A reactive property (use the class scope syntax, i.e. `MyClass.my_reactive`).
+        """
+
+        internal_name = f"_reactive_{reactive.name}"
+        value = getattr(self, internal_name)
+        reactive._set(self, value, always=True)
+
+    def data_bind(
+        self,
+        *reactives: Reactive[Any],
+        **bind_vars: Reactive[Any] | object,
+    ) -> Self:
+        """Bind reactive data so that changes to a reactive automatically change the reactive on another widget.
+
+        Reactives may be given as positional arguments or keyword arguments.
+        See the [guide on data binding](/guide/reactivity#data-binding).
+
+        Example:
+            ```python
+            def compose(self) -> ComposeResult:
+                yield WorldClock("Europe/London").data_bind(WorldClockApp.time)
+                yield WorldClock("Europe/Paris").data_bind(WorldClockApp.time)
+                yield WorldClock("Asia/Tokyo").data_bind(WorldClockApp.time)
+            ```
+
+        Raises:
+            ReactiveError: If the data wasn't bound.
+
+        Returns:
+            Self.
+        """
+        _rich_traceback_omit = True
+
+        parent = active_message_pump.get()
+
+        if self._reactive_connect is None:
+            self._reactive_connect = {}
+        bind_vars = {**{reactive.name: reactive for reactive in reactives}, **bind_vars}
+        for name, reactive in bind_vars.items():
+            if name not in self._reactives:
+                raise ReactiveError(
+                    f"Unable to bind non-reactive attribute {name!r} on {self}"
+                )
+            if isinstance(reactive, Reactive) and not isinstance(
+                parent, reactive.owner
+            ):
+                raise ReactiveError(
+                    f"Unable to bind data; {reactive.owner.__name__} is not defined on {parent.__class__.__name__}."
+                )
+            self._reactive_connect[name] = (parent, reactive)
+        if self._is_mounted:
+            self._initialize_data_bind()
+        else:
+            self.call_later(self._initialize_data_bind)
+        return self
+
+    def _initialize_data_bind(self) -> None:
+        """initialize a data binding.
+
+        Args:
+            compose_parent: The node doing the binding.
+        """
+        if not self._reactive_connect:
+            return
+        for variable_name, (compose_parent, reactive) in self._reactive_connect.items():
+
+            def make_setter(variable_name: str) -> Callable[[object], None]:
+                """Make a setter for the given variable name.
+
+                Args:
+                    variable_name: Name of variable being set.
+
+                Returns:
+                    A callable which takes the value to set.
+                """
+
+                def setter(value: object) -> None:
+                    """Set bound data."""
+                    _rich_traceback_omit = True
+                    Reactive._initialize_object(self)
+                    # Wrap the value in `_Mutated` so the setter knows to invoke watchers etc.
+                    setattr(self, variable_name, _Mutated(value))
+
+                return setter
+
+            assert isinstance(compose_parent, DOMNode)
+            setter = make_setter(variable_name)
+            if isinstance(reactive, Reactive):
+                self.watch(
+                    compose_parent,
+                    reactive.name,
+                    setter,
+                    init=True,
+                )
+            else:
+                self.call_later(partial(setter, reactive))
+        self._reactive_connect = None
 
     def compose_add_child(self, widget: Widget) -> None:
         """Add a node to children.
@@ -212,6 +412,53 @@ class DOMNode(MessagePump):
         return self._nodes
 
     @property
+    def displayed_children(self) -> Sequence[Widget]:
+        """The displayed children (where `node.display==True`).
+
+        Returns:
+            A sequence of widgets.
+        """
+        return self._nodes.displayed
+
+    @property
+    def displayed_and_visible_children(self) -> Sequence[Widget]:
+        """The displayed children (where `node.display==True` and `node.visible==True`).
+
+        Returns:
+            A sequence of widgets.
+        """
+        return self._nodes.displayed_and_visible
+
+    @property
+    def is_empty(self) -> bool:
+        """Are there no displayed children?"""
+        return not any(child.display for child in self._nodes)
+
+    def sort_children(
+        self,
+        *,
+        key: Callable[[Widget], SupportsRichComparison] | None = None,
+        reverse: bool = False,
+    ) -> None:
+        """Sort child widgets with an optional key function.
+
+        If `key` is not provided then widgets will be sorted in the order they are constructed.
+
+        Example:
+            ```python
+            # Sort widgets by name
+            screen.sort_children(key=lambda widget: widget.name or "")
+            ```
+
+        Args:
+            key: A callable which accepts a widget and returns something that can be sorted,
+                or `None` to sort without a key function.
+            reverse: Sort in descending order.
+        """
+        self._nodes._sort(key=key, reverse=reverse)
+        self.refresh(layout=True)
+
+    @property
     def auto_refresh(self) -> float | None:
         """Number of seconds between automatic refresh, or `None` for no automatic refresh."""
         return self._auto_refresh
@@ -223,7 +470,7 @@ class DOMNode(MessagePump):
             self._auto_refresh_timer = None
         if interval is not None:
             self._auto_refresh_timer = self.set_interval(
-                interval, self._automatic_refresh, name=f"auto refresh {self!r}"
+                interval, self.automatic_refresh, name=f"auto refresh {self!r}"
             )
         self._auto_refresh = interval
 
@@ -231,6 +478,20 @@ class DOMNode(MessagePump):
     def workers(self) -> WorkerManager:
         """The app's worker manager. Shortcut for `self.app.workers`."""
         return self.app.workers
+
+    def trap_focus(self, trap_focus: bool = True) -> None:
+        """Trap the focus.
+
+        When applied to a container, this will limit tab-to-focus to the children of that
+        container (once focus is within that container).
+
+        This can be useful for widgets that act like modal dialogs, where you want to restrict
+        the user to the controls within the dialog.
+
+        Args:
+            trap_focus: `True` to trap focus. `False` to restore default behavior.
+        """
+        self._trap_focus = trap_focus
 
     def run_worker(
         self,
@@ -260,7 +521,14 @@ class DOMNode(MessagePump):
         Returns:
             New Worker instance.
         """
-        worker: Worker[ResultType] = self.workers._new_worker(
+
+        # If we're running a worker from inside a secondary thread,
+        # do so in a thread-safe way.
+        if self.app._thread_id != threading.get_ident():
+            creator = partial(self.app.call_from_thread, self.workers._new_worker)
+        else:
+            creator = self.workers._new_worker
+        worker: Worker[ResultType] = creator(
             work,
             self,
             name=name,
@@ -278,9 +546,21 @@ class DOMNode(MessagePump):
         """Is the node a modal?"""
         return False
 
-    def _automatic_refresh(self) -> None:
-        """Perform an automatic refresh (set with auto_refresh property)."""
-        self.refresh()
+    @property
+    def is_on_screen(self) -> bool:
+        """Check if the node was displayed in the last screen update."""
+        return False
+
+    def automatic_refresh(self) -> None:
+        """Perform an automatic refresh.
+
+        This method is called when you set the `auto_refresh` attribute.
+        You could implement this method if you want to perform additional work
+        during an automatic refresh.
+
+        """
+        if self.is_on_screen:
+            self.refresh()
 
     def __init_subclass__(
         cls,
@@ -304,16 +584,25 @@ class DOMNode(MessagePump):
         cls._inherit_bindings = inherit_bindings
         cls._inherit_component_classes = inherit_component_classes
         css_type_names: set[str] = set()
-        for base in cls._css_bases(cls):
+        bases = cls._css_bases(cls)
+        cls._css_type_name = bases[0].__name__
+        for base in bases:
             css_type_names.add(base.__name__)
         cls._merged_bindings = cls._merge_bindings()
         cls._css_type_names = frozenset(css_type_names)
+        cls._computes = frozenset(
+            [
+                name.lstrip("_")[8:]
+                for name in dir(cls)
+                if name.startswith(("_compute_", "compute_"))
+            ]
+        )
 
-    def get_component_styles(self, name: str) -> RenderStyles:
+    def get_component_styles(self, *names: str) -> RenderStyles:
         """Get a "component" styles object (must be defined in COMPONENT_CLASSES classvar).
 
         Args:
-            name: Name of the component.
+            names: Names of the components.
 
         Raises:
             KeyError: If the component class doesn't exist.
@@ -321,9 +610,19 @@ class DOMNode(MessagePump):
         Returns:
             A Styles object.
         """
-        if name not in self._component_styles:
-            raise KeyError(f"No {name!r} key in COMPONENT_CLASSES")
-        styles = self._component_styles[name]
+
+        styles = RenderStyles(self, Styles(), Styles())
+
+        for name in names:
+            if name not in self._component_styles:
+                raise KeyError(f"No {name!r} key in COMPONENT_CLASSES")
+            component_styles = self._component_styles[name]
+            assert component_styles.node is not None
+            styles._update_node(component_styles.node)
+            styles.base.merge(component_styles.base)
+            styles.inline.merge(component_styles.inline)
+            styles._updates += 1
+
         return styles
 
     def _post_mount(self):
@@ -369,27 +668,31 @@ class DOMNode(MessagePump):
         return classes
 
     @classmethod
-    def _merge_bindings(cls) -> _Bindings:
+    def _merge_bindings(cls) -> BindingsMap:
         """Merge bindings from base classes.
 
         Returns:
             Merged bindings.
         """
-        bindings: list[_Bindings] = []
+        bindings: list[BindingsMap] = []
 
         for base in reversed(cls.__mro__):
             if issubclass(base, DOMNode):
                 if not base._inherit_bindings:
                     bindings.clear()
                 bindings.append(
-                    _Bindings(
+                    BindingsMap(
                         base.__dict__.get("BINDINGS", []),
                     )
                 )
-        keys: dict[str, Binding] = {}
+
+        keys: dict[str, list[Binding]] = {}
         for bindings_ in bindings:
-            keys.update(bindings_.keys)
-        return _Bindings(keys.values())
+            for key, key_bindings in bindings_.key_to_bindings.items():
+                keys[key] = key_bindings
+
+        new_bindings = BindingsMap.from_keys(keys)
+        return new_bindings
 
     def _post_register(self, app: App) -> None:
         """Called when the widget is registered
@@ -399,36 +702,54 @@ class DOMNode(MessagePump):
         """
 
     def __rich_repr__(self) -> rich.repr.Result:
-        yield "name", self._name, None
-        yield "id", self._id, None
-        if self._classes:
+        # Being a bit defensive here to guard against errors when calling repr before initialization
+        if hasattr(self, "_name"):
+            yield "name", self._name, None
+        if hasattr(self, "_id"):
+            yield "id", self._id, None
+        if hasattr(self, "_classes") and self._classes:
             yield "classes", " ".join(self._classes)
 
-    def _get_default_css(self) -> list[tuple[str, str, int]]:
+    def _get_default_css(self) -> list[tuple[CSSLocation, str, int, str]]:
         """Gets the CSS for this class and inherited from bases.
 
         Default CSS is inherited from base classes, unless `inherit_css` is set to
         `False` when subclassing.
 
         Returns:
-            A list of tuples containing (PATH, SOURCE) for this
-                and inherited from base classes.
+            A list of tuples containing (LOCATION, SOURCE, SPECIFICITY, SCOPE) for this
+                class and inherited from base classes.
         """
 
-        css_stack: list[tuple[str, str, int]] = []
+        css_stack: list[tuple[CSSLocation, str, int, str]] = []
 
-        def get_path(base: Type[DOMNode]) -> str:
-            """Get a path to the DOM Node"""
+        def get_location(base: Type[DOMNode]) -> CSSLocation:
+            """Get the original location of this DEFAULT_CSS.
+
+            Args:
+                base: The class from which the default css was extracted.
+
+            Returns:
+                The filename where the class was defined (if possible) and the class
+                    variable the CSS was extracted from.
+            """
             try:
-                return f"{getfile(base)}:{base.__name__}"
+                return (getfile(base), f"{base.__name__}.DEFAULT_CSS")
             except (TypeError, OSError):
-                return f"{base.__name__}"
+                return ("", f"{base.__name__}.DEFAULT_CSS")
 
         for tie_breaker, base in enumerate(self._node_bases):
-            css = base.__dict__.get("DEFAULT_CSS", "").strip()
+            css: str = base.__dict__.get("DEFAULT_CSS", "")
             if css:
-                css_stack.append((get_path(base), css, -tie_breaker))
-
+                scoped: bool = base.__dict__.get("SCOPED_CSS", True)
+                css_stack.append(
+                    (
+                        get_location(base),
+                        css,
+                        -tie_breaker,
+                        base._css_type_name if scoped else "",
+                    )
+                )
         return css_stack
 
     @classmethod
@@ -471,11 +792,16 @@ class DOMNode(MessagePump):
         """
         # Get the node by looking up a chain of parents
         # Note that self.screen may not be the same as self.app.screen
-        from .screen import Screen
+        from textual.screen import Screen
 
         node: MessagePump | None = self
-        while node is not None and not isinstance(node, Screen):
-            node = node._parent
+        try:
+            while node is not None and not isinstance(node, Screen):
+                node = node._parent
+        except AttributeError:
+            raise RuntimeError(
+                "Widget is missing attributes; have you called the constructor in your widget class?"
+            ) from None
         if not isinstance(node, Screen):
             raise NoScreen("node has no screen")
         return node
@@ -496,7 +822,7 @@ class DOMNode(MessagePump):
             ValueError: If the ID has already been set.
         """
         check_identifiers("id", new_id)
-
+        self._nodes.updated()
         if self._id is not None:
             raise ValueError(
                 f"Node 'id' attribute may not be changed once set (current id={self._id!r})"
@@ -540,8 +866,7 @@ class DOMNode(MessagePump):
     @property
     def pseudo_classes(self) -> frozenset[str]:
         """A (frozen) set of all pseudo classes."""
-        pseudo_classes = frozenset(self.get_pseudo_classes())
-        return pseudo_classes
+        return frozenset(self.get_pseudo_classes())
 
     @property
     def css_path_nodes(self) -> list[DOMNode]:
@@ -554,26 +879,24 @@ class DOMNode(MessagePump):
         append = result.append
 
         node: DOMNode = self
-        while isinstance(node._parent, DOMNode):
-            node = node._parent
+        while isinstance((node := node._parent), DOMNode):
             append(node)
         return result[::-1]
 
     @property
-    def _selector_names(self) -> list[str]:
+    def _selector_names(self) -> set[str]:
         """Get a set of selectors applicable to this widget.
 
         Returns:
             Set of selector names.
         """
-        selectors: list[str] = [
+        selectors: set[str] = {
             "*",
             *(f".{class_name}" for class_name in self._classes),
-            *(f":{class_name}" for class_name in self.get_pseudo_classes()),
             *self._css_types,
-        ]
+        }
         if self._id is not None:
-            selectors.append(f"#{self._id}")
+            selectors.add(f"#{self._id}")
         return selectors
 
     @property
@@ -587,7 +910,9 @@ class DOMNode(MessagePump):
             my_widget.display = False  # Hide my_widget
             ```
         """
-        return self.styles.display != "none" and not (self._closing or self._closed)
+        return self.styles.display != "none" and not (
+            self._closing or self._closed or self._pruning
+        )
 
     @display.setter
     def display(self, new_val: bool | str) -> None:
@@ -612,13 +937,21 @@ class DOMNode(MessagePump):
 
     @property
     def visible(self) -> bool:
-        """Is the visibility style set to a visible state?
+        """Is this widget visible in the DOM?
 
-        May be set to a boolean to make the node visible (`True`) or invisible (`False`), or to any valid value for the `visibility` rule.
+        If a widget hasn't had its visibility set explicitly, then it inherits it from its
+        DOM ancestors.
 
-        When a node is invisible, Textual will reserve space for it, but won't display anything there.
+        This may be set explicitly to override inherited values.
+        The valid values include the valid values for the `visibility` rule and the booleans
+        `True` or `False`, to set the widget to be visible or invisible, respectively.
+
+        When a node is invisible, Textual will reserve space for it, but won't display anything.
         """
-        return self.styles.visibility != "hidden"
+        own_value = self.styles.get_rule("visibility")
+        if own_value is not None:
+            return own_value != "hidden"
+        return self.parent.visible if self.parent else True
 
     @visible.setter
     def visible(self, new_value: bool | str) -> None:
@@ -646,6 +979,7 @@ class DOMNode(MessagePump):
         Returns:
             A Tree renderable.
         """
+        from rich.pretty import Pretty
 
         def render_info(node: DOMNode) -> Pretty:
             """Render a node for the tree."""
@@ -680,8 +1014,9 @@ class DOMNode(MessagePump):
         from rich.columns import Columns
         from rich.console import Group
         from rich.panel import Panel
+        from rich.pretty import Pretty
 
-        from .widget import Widget
+        from textual.widget import Widget
 
         def render_info(node: DOMNode) -> Columns:
             """Render a node for the tree."""
@@ -739,6 +1074,14 @@ class DOMNode(MessagePump):
         )
 
     @property
+    def selection_style(self) -> Style:
+        """The style of selected text."""
+        style = self.screen.get_component_rich_style(
+            "screen--selection", default=RICH_NULL_STYLE
+        )
+        return style
+
+    @property
     def rich_style(self) -> Style:
         """Get a Rich Style object for this DOMNode.
 
@@ -753,16 +1096,21 @@ class DOMNode(MessagePump):
 
         for node in reversed(self.ancestors_with_self):
             styles = node.styles
+            has_rule = styles.has_rule
             opacity *= styles.opacity
-            if styles.has_rule("background"):
-                text_background = background + styles.background
-                background += styles.background.multiply_alpha(opacity)
+            if has_rule("background"):
+                text_background = background + styles.background.tint(
+                    styles.background_tint
+                )
+                background += (
+                    styles.background.tint(styles.background_tint)
+                ).multiply_alpha(opacity)
             else:
                 text_background = background
-            if styles.has_rule("color"):
+            if has_rule("color"):
                 color = styles.color
             style += styles.text_style
-            if styles.has_rule("auto_color") and styles.auto_color:
+            if has_rule("auto_color") and styles.auto_color:
                 color = text_background.get_contrast_text(color.a)
 
         style += Style.from_color(
@@ -771,10 +1119,28 @@ class DOMNode(MessagePump):
         )
         return style
 
+    def check_consume_key(self, key: str, character: str | None) -> bool:
+        """Check if the widget may consume the given key.
+
+        This should be implemented in widgets that handle [`Key`][textual.events.Key] events and
+        stop propagation (such as Input and TextArea).
+
+        Implementing this method will hide key bindings from the footer and key panel that would
+        be *consumed* by the focused widget.
+
+        Args:
+            key: A key identifier.
+            character: A character associated with the key, or `None` if there isn't one.
+
+        Returns:
+            `True` if the widget may capture the key in its `Key` event handler, or `False` if it won't.
+        """
+        return False
+
     def _get_title_style_information(
         self, background: Color
-    ) -> tuple[Color, Color, Style]:
-        """Get a Rich Style object for for titles.
+    ) -> tuple[Color, Color, VisualStyle]:
+        """Get a Visual Style object for titles.
 
         Args:
             background: The background color.
@@ -782,6 +1148,7 @@ class DOMNode(MessagePump):
         Returns:
             A Rich style.
         """
+
         styles = self.styles
         if styles.auto_border_title_color:
             color = background.get_contrast_text(styles.border_title_color.a)
@@ -790,13 +1157,13 @@ class DOMNode(MessagePump):
         return (
             color,
             styles.border_title_background,
-            styles.border_title_style,
+            VisualStyle.from_rich_style(styles.border_title_style),
         )
 
     def _get_subtitle_style_information(
         self, background: Color
-    ) -> tuple[Color, Color, Style]:
-        """Get a Rich Style object for for titles.
+    ) -> tuple[Color, Color, VisualStyle]:
+        """Get a Rich Style object for subtitles.
 
         Args:
             background: The background color.
@@ -812,37 +1179,25 @@ class DOMNode(MessagePump):
         return (
             color,
             styles.border_subtitle_background,
-            styles.border_subtitle_style,
+            VisualStyle.from_rich_style(styles.border_subtitle_style),
         )
 
     @property
     def background_colors(self) -> tuple[Color, Color]:
-        """The background color and the color of the parent's background.
-
-        Returns:
-            `(<background color>, <color>)`
-        """
-        base_background = background = BLACK
-        for node in reversed(self.ancestors_with_self):
-            styles = node.styles
-            base_background = background
-            background += styles.background
-        return (base_background, background)
-
-    @property
-    def _opacity_background_colors(self) -> tuple[Color, Color]:
         """Background colors adjusted for opacity.
 
         Returns:
             `(<background color>, <color>)`
         """
-        base_background = background = BLACK
+        base_background = background = Color(0, 0, 0, 0)
         opacity = 1.0
         for node in reversed(self.ancestors_with_self):
             styles = node.styles
             base_background = background
             opacity *= styles.opacity
-            background += styles.background.multiply_alpha(opacity)
+            background += styles.background.tint(styles.background_tint).multiply_alpha(
+                opacity
+            )
         return (base_background, background)
 
     @property
@@ -857,7 +1212,7 @@ class DOMNode(MessagePump):
         for node in reversed(self.ancestors_with_self):
             styles = node.styles
             base_background = background
-            background += styles.background
+            background += styles.background.tint(styles.background_tint)
             if styles.has_rule("color"):
                 base_color = color
                 if styles.auto_color:
@@ -869,7 +1224,7 @@ class DOMNode(MessagePump):
 
     @property
     def ancestors_with_self(self) -> list[DOMNode]:
-        """A list of Nodes by tracing a path all the way back to App.
+        """A list of ancestor nodes found by tracing a path all the way back to App.
 
         Note:
             This is inclusive of ``self``.
@@ -877,31 +1232,26 @@ class DOMNode(MessagePump):
         Returns:
             A list of nodes.
         """
-        nodes: list[MessagePump | None] = []
+        nodes: list[MessagePump | None] = [self]
         add_node = nodes.append
         node: MessagePump | None = self
-        while node is not None:
+        while (node := node._parent) is not None:
             add_node(node)
-            node = node._parent
         return cast("list[DOMNode]", nodes)
 
     @property
     def ancestors(self) -> list[DOMNode]:
-        """A list of ancestor nodes Nodes by tracing ancestors all the way back to App.
+        """A list of ancestor nodes found by tracing a path all the way back to App.
 
         Returns:
             A list of nodes.
         """
-        return self.ancestors_with_self[1:]
-
-    @property
-    def displayed_children(self) -> list[Widget]:
-        """The child nodes which will be displayed.
-
-        Returns:
-            A list of nodes.
-        """
-        return [child for child in self._nodes if child.display]
+        nodes: list[MessagePump | None] = []
+        add_node = nodes.append
+        node: MessagePump | None = self
+        while (node := node._parent) is not None:
+            add_node(node)
+        return cast("list[DOMNode]", nodes)
 
     def watch(
         self,
@@ -913,15 +1263,12 @@ class DOMNode(MessagePump):
         """Watches for modifications to reactive attributes on another object.
 
         Example:
-
-            Here's how you could detect when the app changes from dark to light mode (and vice versa).
-
             ```python
-            def on_dark_change(old_value:bool, new_value:bool):
-                # Called when app.dark changes.
-                print("App.dark when from {old_value} to {new_value}")
+            def on_theme_change(old_value:str, new_value:str) -> None:
+                # Called when app.theme changes.
+                print(f"App.theme went from {old_value} to {new_value}")
 
-            self.watch(self.app, "dark", self.on_dark_change, init=False)
+            self.watch(self.app, "theme", self.on_theme_change, init=False)
             ```
 
         Args:
@@ -932,17 +1279,22 @@ class DOMNode(MessagePump):
         """
         _watch(self, obj, attribute_name, callback, init=init)
 
-    def get_pseudo_classes(self) -> Iterable[str]:
-        """Get any pseudo classes applicable to this Node, e.g. hover, focus.
+    def get_pseudo_classes(self) -> set[str]:
+        """Pseudo classes for a widget.
 
         Returns:
-            Iterable of strings, such as a generator.
+            Names of the pseudo classes.
         """
-        return ()
+
+        return {
+            name
+            for name, check_class in self._PSEUDO_CLASSES.items()
+            if check_class(self)
+        }
 
     def reset_styles(self) -> None:
         """Reset styles back to their initial state."""
-        from .widget import Widget
+        from textual.widget import Widget
 
         for node in self.walk_children(with_self=True):
             node._css_styles.reset()
@@ -953,6 +1305,9 @@ class DOMNode(MessagePump):
     def _add_child(self, node: Widget) -> None:
         """Add a new child node.
 
+        !!! note
+            For tests only.
+
         Args:
             node: A DOM node.
         """
@@ -962,6 +1317,9 @@ class DOMNode(MessagePump):
     def _add_children(self, *nodes: Widget) -> None:
         """Add multiple children to this node.
 
+        !!! note
+            For tests only.
+
         Args:
             *nodes: Positional args should be new DOM nodes.
         """
@@ -969,29 +1327,30 @@ class DOMNode(MessagePump):
         for node in nodes:
             node._attach(self)
             _append(node)
+            node._add_children(*node._pending_children)
 
     WalkType = TypeVar("WalkType", bound="DOMNode")
 
-    @overload
-    def walk_children(
-        self,
-        filter_type: type[WalkType],
-        *,
-        with_self: bool = False,
-        method: WalkMethod = "depth",
-        reverse: bool = False,
-    ) -> list[WalkType]:
-        ...
+    if TYPE_CHECKING:
 
-    @overload
-    def walk_children(
-        self,
-        *,
-        with_self: bool = False,
-        method: WalkMethod = "depth",
-        reverse: bool = False,
-    ) -> list[DOMNode]:
-        ...
+        @overload
+        def walk_children(
+            self,
+            filter_type: type[WalkType],
+            *,
+            with_self: bool = False,
+            method: WalkMethod = "depth",
+            reverse: bool = False,
+        ) -> list[WalkType]: ...
+
+        @overload
+        def walk_children(
+            self,
+            *,
+            with_self: bool = False,
+            method: WalkMethod = "depth",
+            reverse: bool = False,
+        ) -> list[DOMNode]: ...
 
     def walk_children(
         self,
@@ -1027,81 +1386,327 @@ class DOMNode(MessagePump):
             nodes.reverse()
         return cast("list[DOMNode]", nodes)
 
-    @overload
-    def query(self, selector: str | None) -> DOMQuery[Widget]:
-        ...
+    if TYPE_CHECKING:
 
-    @overload
-    def query(self, selector: type[QueryType]) -> DOMQuery[QueryType]:
-        ...
+        @overload
+        def query(self, selector: str | None = None) -> DOMQuery[Widget]: ...
+
+        @overload
+        def query(self, selector: type[QueryType]) -> DOMQuery[QueryType]: ...
 
     def query(
         self, selector: str | type[QueryType] | None = None
     ) -> DOMQuery[Widget] | DOMQuery[QueryType]:
-        """Get a DOM query matching a selector.
+        """Query the DOM for children that match a selector or widget type.
 
         Args:
-            selector: A CSS selector or `None` for all nodes.
+            selector: A CSS selector, widget type, or `None` for all nodes.
 
         Returns:
             A query object.
         """
-        from .css.query import DOMQuery, QueryType
-        from .widget import Widget
+        from textual.css.query import DOMQuery, QueryType
+        from textual.widget import Widget
 
+        node = self._get_dom_base()
         if isinstance(selector, str) or selector is None:
-            return DOMQuery[Widget](self, filter=selector)
+            return DOMQuery[Widget](node, filter=selector)
         else:
-            return DOMQuery[QueryType](self, filter=selector.__name__)
+            return DOMQuery[QueryType](node, filter=selector.__name__)
 
-    @overload
-    def query_one(self, selector: str) -> Widget:
-        ...
+    if TYPE_CHECKING:
 
-    @overload
-    def query_one(self, selector: type[QueryType]) -> QueryType:
-        ...
+        @overload
+        def query_children(self, selector: str | None = None) -> DOMQuery[Widget]: ...
 
-    @overload
-    def query_one(self, selector: str, expect_type: type[QueryType]) -> QueryType:
-        ...
+        @overload
+        def query_children(self, selector: type[QueryType]) -> DOMQuery[QueryType]: ...
+
+    def query_children(
+        self, selector: str | type[QueryType] | None = None
+    ) -> DOMQuery[Widget] | DOMQuery[QueryType]:
+        """Query the DOM for the immediate children that match a selector or widget type.
+
+        Note that this will not return child widgets more than a single level deep.
+        If you want to a query to potentially match all children in the widget tree,
+        see [query][textual.dom.DOMNode.query].
+
+        Args:
+            selector: A CSS selector, widget type, or `None` for all nodes.
+
+        Returns:
+            A query object.
+        """
+        from textual.css.query import DOMQuery, QueryType
+        from textual.widget import Widget
+
+        node = self._get_dom_base()
+        if isinstance(selector, str) or selector is None:
+            return DOMQuery[Widget](node, deep=False, filter=selector)
+        else:
+            return DOMQuery[QueryType](node, deep=False, filter=selector.__name__)
+
+    if TYPE_CHECKING:
+
+        @overload
+        def query_one(self, selector: str) -> Widget: ...
+
+        @overload
+        def query_one(self, selector: type[QueryType]) -> QueryType: ...
+
+        @overload
+        def query_one(
+            self, selector: str, expect_type: type[QueryType]
+        ) -> QueryType: ...
 
     def query_one(
         self,
         selector: str | type[QueryType],
         expect_type: type[QueryType] | None = None,
     ) -> QueryType | Widget:
-        """Get a single Widget matching the given selector or selector type.
+        """Get a widget from this widget's children that matches a selector or widget type.
 
         Args:
-            selector: A selector.
+            selector: A selector or widget type.
             expect_type: Require the object be of the supplied type, or None for any type.
 
         Raises:
             WrongType: If the wrong type was found.
             NoMatches: If no node matches the query.
-            TooManyMatches: If there is more than one matching node in the query.
 
         Returns:
             A widget matching the selector.
         """
         _rich_traceback_omit = True
-        from .css.query import DOMQuery
+
+        base_node = self._get_dom_base()
 
         if isinstance(selector, str):
             query_selector = selector
         else:
             query_selector = selector.__name__
-        query: DOMQuery[Widget] = DOMQuery(self, filter=query_selector)
 
-        return query.only_one() if expect_type is None else query.only_one(expect_type)
+        if is_id_selector(query_selector):
+            cache_key = (base_node._nodes._updates, query_selector, expect_type)
+            cached_result = base_node._query_one_cache.get(cache_key)
+            if cached_result is not None:
+                return cached_result
+            if (
+                node := walk_breadth_search_id(
+                    base_node, query_selector[1:], with_root=False
+                )
+            ) is not None:
+                if expect_type is not None and not isinstance(node, expect_type):
+                    raise WrongType(
+                        f"Node matching {query_selector!r} is the wrong type; expected type {expect_type.__name__!r}, found {node}"
+                    )
+                base_node._query_one_cache[cache_key] = node
+                return node
+            raise NoMatches(f"No nodes match {query_selector!r} on {base_node!r}")
 
-    def set_styles(self, css: str | None = None, **update_styles) -> Self:
+        try:
+            selector_set = parse_selectors(query_selector)
+        except TokenError:
+            raise InvalidQueryFormat(
+                f"Unable to parse {query_selector!r} as a query; check for syntax errors"
+            ) from None
+
+        if all(selectors.is_simple for selectors in selector_set):
+            cache_key = (base_node._nodes._updates, query_selector, expect_type)
+            cached_result = base_node._query_one_cache.get(cache_key)
+            if cached_result is not None:
+                return cached_result
+        else:
+            cache_key = None
+
+        for node in walk_breadth_first(base_node, with_root=False):
+            if not match(selector_set, node):
+                continue
+            if expect_type is not None and not isinstance(node, expect_type):
+                raise WrongType(
+                    f"Node matching {query_selector!r} is the wrong type; expected type {expect_type.__name__!r}, found {node}"
+                )
+            if cache_key is not None:
+                base_node._query_one_cache[cache_key] = node
+            return node
+
+        raise NoMatches(f"No nodes match {query_selector!r} on {base_node!r}")
+
+    if TYPE_CHECKING:
+
+        @overload
+        def query_one_optional(self, selector: str) -> Widget | None: ...
+
+        @overload
+        def query_one_optional(self, selector: type[QueryType]) -> QueryType | None: ...
+
+        @overload
+        def query_one_optional(
+            self, selector: str, expect_type: type[QueryType]
+        ) -> QueryType | None: ...
+
+    def query_one_optional(
+        self,
+        selector: str | type[QueryType],
+        expect_type: type[QueryType] | None = None,
+    ) -> QueryType | Widget | None:
+        """Get a widget from this widget's children that matches a selector or widget type,
+        or `None` if there is no match.
+
+        Args:
+            selector: A selector or widget type.
+            expect_type: Require the object be of the supplied type, or None for any type.
+
+        Raises:
+            WrongType: If the wrong type was found.
+
+        Returns:
+            A widget matching the selector, or `None`.
+        """
+        try:
+            widget = self.query_one(selector, expect_type)
+        except NoMatches:
+            return None
+        return widget
+
+    if TYPE_CHECKING:
+
+        @overload
+        def query_exactly_one(self, selector: str) -> Widget: ...
+
+        @overload
+        def query_exactly_one(self, selector: type[QueryType]) -> QueryType: ...
+
+        @overload
+        def query_exactly_one(
+            self, selector: str, expect_type: type[QueryType]
+        ) -> QueryType: ...
+
+    def query_exactly_one(
+        self,
+        selector: str | type[QueryType],
+        expect_type: type[QueryType] | None = None,
+    ) -> QueryType | Widget:
+        """Get a widget from this widget's children that matches a selector or widget type.
+
+        !!! Note
+            This method is similar to [query_one][textual.dom.DOMNode.query_one].
+            The only difference is that it will raise `TooManyMatches` if there is more than a single match.
+
+        Args:
+            selector: A selector or widget type.
+            expect_type: Require the object be of the supplied type, or None for any type.
+
+        Raises:
+            WrongType: If the wrong type was found.
+            NoMatches: If no node matches the query.
+            TooManyMatches: If there is more than one matching node in the query (and `exactly_one==True`).
+
+        Returns:
+            A widget matching the selector.
+        """
+        _rich_traceback_omit = True
+
+        base_node = self._get_dom_base()
+
+        if isinstance(selector, str):
+            query_selector = selector
+        else:
+            query_selector = selector.__name__
+
+        try:
+            selector_set = parse_selectors(query_selector)
+        except TokenError:
+            raise InvalidQueryFormat(
+                f"Unable to parse {query_selector!r} as a query; check for syntax errors"
+            ) from None
+
+        if all(selectors.is_simple for selectors in selector_set):
+            cache_key = (base_node._nodes._updates, query_selector, expect_type)
+            cached_result = base_node._query_one_cache.get(cache_key)
+            if cached_result is not None:
+                return cached_result
+        else:
+            cache_key = None
+
+        children = walk_breadth_first(base_node, with_root=False)
+        iter_children = iter(children)
+        for node in iter_children:
+            if not match(selector_set, node):
+                continue
+            if expect_type is not None and not isinstance(node, expect_type):
+                raise WrongType(
+                    f"Node matching {query_selector!r} is the wrong type; expected type {expect_type.__name__!r}, found {node}"
+                )
+            for later_node in iter_children:
+                if match(selector_set, later_node):
+                    raise TooManyMatches(
+                        "Call to query_one resulted in more than one matched node"
+                    )
+            if cache_key is not None:
+                base_node._query_one_cache[cache_key] = node
+            return node
+
+        raise NoMatches(f"No nodes match {query_selector!r} on {base_node!r}")
+
+    if TYPE_CHECKING:
+
+        @overload
+        def query_ancestor(self, selector: str) -> DOMNode: ...
+
+        @overload
+        def query_ancestor(self, selector: type[QueryType]) -> QueryType: ...
+
+        @overload
+        def query_ancestor(
+            self, selector: str, expect_type: type[QueryType]
+        ) -> QueryType: ...
+
+    def query_ancestor(
+        self,
+        selector: str | type[QueryType],
+        expect_type: type[QueryType] | None = None,
+    ) -> DOMNode:
+        """Get an ancestor which matches a query.
+
+        Args:
+            selector: A TCSS selector.
+            expect_type: Expected type, or `None` for any DOMNode.
+
+        Raises:
+            InvalidQueryFormat: If the selector is invalid.
+            NoMatches: If there are no matching ancestors.
+
+        Returns:
+            A DOMNode or subclass if `expect_type` is provided.
+        """
+        base_node = self._get_dom_base()
+        if isinstance(selector, str):
+            query_selector = selector
+        else:
+            query_selector = selector.__name__
+
+        try:
+            selector_set = parse_selectors(query_selector)
+        except TokenError:
+            raise InvalidQueryFormat(
+                f"Unable to parse {query_selector!r} as a query; check for syntax errors"
+            ) from None
+        if base_node.parent is not None:
+            for node in base_node.parent.ancestors_with_self:
+                if not match(selector_set, node):
+                    continue
+                if expect_type is not None and not isinstance(node, expect_type):
+                    continue
+                return node
+        raise NoMatches(f"No ancestor matches {selector!r} on {self!r}")
+
+    def set_styles(self, css: str | None = None, **update_styles: Any) -> Self:
         """Set custom styles on this object.
 
         Args:
             css: Styles in CSS format.
-            **update_styles: Keyword arguments map style names on to style.
+            update_styles: Keyword arguments map style names onto style values.
 
         Returns:
             Self.
@@ -1109,7 +1714,7 @@ class DOMNode(MessagePump):
 
         if css is not None:
             try:
-                new_styles = parse_declarations(css, path="set_styles")
+                new_styles = parse_declarations(css, read_from=("set_styles", ""))
             except DeclarationError as error:
                 raise DeclarationError(error.name, error.token, error.message) from None
             self._inline_styles.merge(new_styles)
@@ -1131,19 +1736,59 @@ class DOMNode(MessagePump):
         """
         return self._classes.issuperset(class_names)
 
-    def set_class(self, add: bool, *class_names: str) -> Self:
+    def set_class(self, add: bool, *class_names: str, update: bool = True) -> Self:
         """Add or remove class(es) based on a condition.
+
+        This can condense the four lines required to implement the equivalent branch into a single line.
+
+        Example:
+            ```python
+            #if foo:
+            #    self.add_class("-foo")
+            #else:
+            #    self.remove_class("-foo")
+            self.set_class(foo, "-foo")
+            ```
 
         Args:
             add: Add the classes if True, otherwise remove them.
+            update: Also update styles.
 
         Returns:
             Self.
         """
         if add:
-            self.add_class(*class_names)
+            self.add_class(*class_names, update=update)
         else:
-            self.remove_class(*class_names)
+            self.remove_class(*class_names, update=update)
+        return self
+
+    def update_classes(
+        self, classes: Mapping[str, bool], update: bool = True, animate: bool = True
+    ) -> Self:
+        """Update classes in an atomic batch.
+
+        Args:
+            classes: A mapping of class name on to a boolean where `True` adds
+                to the current classes, and `False` removes.
+            update: Also update styles.
+            animate: Enable any CSS animation?
+
+        Returns:
+            Self
+        """
+
+        add_classes: set[str] = set()
+        remove_classes: set[str] = set()
+        adds = (remove_classes.add, add_classes.add)
+        for class_name, add in classes.items():
+            adds[add](class_name)
+
+        new_classes = (self._classes | add_classes) - remove_classes
+        if self._classes != new_classes:
+            self._classes = new_classes
+            if update:
+                self.update_node_styles(animate=animate)
         return self
 
     def set_classes(self, classes: str | Iterable[str]) -> Self:
@@ -1159,48 +1804,50 @@ class DOMNode(MessagePump):
         self.classes = classes
         return self
 
-    def _update_styles(self) -> None:
+    def update_node_styles(self, animate: bool = True) -> None:
         """Request an update of this node's styles.
 
-        Should be called whenever CSS classes / pseudo classes change.
+        Called by Textual whenever CSS classes / pseudo classes change.
         """
         try:
-            self.app.update_styles(self)
+            self.app.update_styles(self, animate=animate)
         except NoActiveAppError:
             pass
 
-    def add_class(self, *class_names: str) -> Self:
+    def add_class(self, *class_names: str, update: bool = True) -> Self:
         """Add class names to this Node.
 
         Args:
             *class_names: CSS class names to add.
+            update: Also update styles.
 
         Returns:
             Self.
         """
         check_identifiers("class name", *class_names)
-        old_classes = self._classes.copy()
-        self._classes.update(class_names)
-        if old_classes == self._classes:
+        if self._classes.issuperset(class_names):
             return self
-        self._update_styles()
+        self._classes.update(class_names)
+        if update:
+            self.update_node_styles()
         return self
 
-    def remove_class(self, *class_names: str) -> Self:
+    def remove_class(self, *class_names: str, update: bool = True) -> Self:
         """Remove class names from this Node.
 
         Args:
             *class_names: CSS class names to remove.
+            update: Also update styles.
 
         Returns:
             Self.
         """
         check_identifiers("class name", *class_names)
-        old_classes = self._classes.copy()
-        self._classes.difference_update(class_names)
-        if old_classes == self._classes:
+        if self._classes.isdisjoint(class_names):
             return self
-        self._update_styles()
+        self._classes.difference_update(class_names)
+        if update:
+            self.update_node_styles()
         return self
 
     def toggle_class(self, *class_names: str) -> Self:
@@ -1217,20 +1864,81 @@ class DOMNode(MessagePump):
         self._classes.symmetric_difference_update(class_names)
         if old_classes == self._classes:
             return self
-        self._update_styles()
+        self.update_node_styles()
         return self
 
-    def has_pseudo_class(self, *class_names: str) -> bool:
-        """Check for pseudo classes (such as hover, focus etc)
+    def has_pseudo_class(self, class_name: str) -> bool:
+        """Check the node has the given pseudo class.
 
         Args:
-            *class_names: The pseudo classes to check for.
+            class_name: The pseudo class to check for.
 
         Returns:
-            `True` if the DOM node has those pseudo classes, `False` if not.
+            `True` if the DOM node has the pseudo class, `False` if not.
         """
-        has_pseudo_classes = self.pseudo_classes.issuperset(class_names)
-        return has_pseudo_classes
+        try:
+            return self._PSEUDO_CLASSES[class_name](self)
+        except KeyError:
+            return False
 
-    def refresh(self, *, repaint: bool = True, layout: bool = False) -> Self:
+    def has_pseudo_classes(self, class_names: set[str]) -> bool:
+        """Check the node has all the given pseudo classes.
+
+        Args:
+            class_names: Set of class names to check for.
+
+        Returns:
+            `True` if all pseudo class names are present.
+        """
+        PSEUDO_CLASSES = self._PSEUDO_CLASSES
+        try:
+            return all(PSEUDO_CLASSES[name](self) for name in class_names)
+        except KeyError:
+            return False
+
+    @property
+    def _pseudo_classes_cache_key(self) -> tuple[int, ...]:
+        """A cache key used when updating a number of nodes from the stylesheet."""
+        return ()
+
+    def refresh(
+        self, *, repaint: bool = True, layout: bool = False, recompose: bool = False
+    ) -> Self:
         return self
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Check whether an action is enabled.
+
+        Implement this method to add logic for [dynamic actions](/guide/actions#dynamic-actions) / bindings.
+
+        Args:
+            action: The name of an action.
+            parameters: A tuple of any action parameters.
+
+        Returns:
+            `True` if the action is enabled+visible,
+                `False` if the action is disabled+hidden,
+                `None` if the action is disabled+visible (grayed out in footer)
+        """
+        return True
+
+    def refresh_bindings(self) -> None:
+        """Call to prompt widgets such as the [Footer][textual.widgets.Footer] to update
+        the display of key bindings.
+
+        See [actions](/guide/actions#dynamic-actions) for how to use this method.
+
+        """
+        if self._is_mounted:
+            self.screen.refresh_bindings()
+
+    async def action_toggle(self, attribute_name: str) -> None:
+        """Toggle an attribute on the node.
+
+        Assumes the attribute is a bool.
+
+        Args:
+            attribute_name: Name of the attribute.
+        """
+        value = getattr(self, attribute_name)
+        setattr(self, attribute_name, not value)

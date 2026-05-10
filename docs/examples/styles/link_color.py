@@ -3,9 +3,11 @@ from textual.widgets import Label
 
 
 class LinkColorApp(App):
+    CSS_PATH = "link_color.tcss"
+
     def compose(self):
         yield Label(
-            "Visit the [link=https://textualize.io]Textualize[/link] website.",
+            "Visit the [link='https://textualize.io']Textualize[/link] website.",
             id="lbl1",  # (1)!
         )
         yield Label(
@@ -22,4 +24,6 @@ class LinkColorApp(App):
         )
 
 
-app = LinkColorApp(css_path="link_color.css")
+if __name__ == "__main__":
+    app = LinkColorApp()
+    app.run()

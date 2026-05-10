@@ -31,7 +31,7 @@ output = table
 from __future__ import annotations
 
 import re
-from colorsys import hls_to_rgb, rgb_to_hls
+from colorsys import hls_to_rgb, hsv_to_rgb, rgb_to_hls, rgb_to_hsv
 from functools import lru_cache
 from operator import itemgetter
 from typing import Callable, NamedTuple
@@ -40,20 +40,20 @@ import rich.repr
 from rich.color import Color as RichColor
 from rich.color import ColorType
 from rich.color_triplet import ColorTriplet
+from rich.terminal_theme import TerminalTheme
 from typing_extensions import Final
 
+from textual._color_constants import ANSI_COLORS, COLOR_NAME_TO_RGB
 from textual.css.scalar import percentage_string_to_float
 from textual.css.tokenize import CLOSE_BRACE, COMMA, DECIMAL, OPEN_BRACE, PERCENT
+from textual.geometry import clamp
 from textual.suggestions import get_suggestion
-
-from ._color_constants import COLOR_NAME_TO_RGB
-from .geometry import clamp
 
 _TRUECOLOR = ColorType.TRUECOLOR
 
 
 class HSL(NamedTuple):
-    """A color in HLS (Hue, Saturation, Lightness) format."""
+    """A color in HSL (Hue, Saturation, Lightness) format."""
 
     h: float
     """Hue in range 0 to 1."""
@@ -82,7 +82,7 @@ class HSV(NamedTuple):
     s: float
     """Saturation in range 0 to 1."""
     v: float
-    """Value un range 0 to 1."""
+    """Value in range 0 to 1."""
 
 
 class Lab(NamedTuple):
@@ -110,11 +110,11 @@ hsla{OPEN_BRACE}({DECIMAL}{COMMA}{PERCENT}{COMMA}{PERCENT}{COMMA}{DECIMAL}){CLOS
     re.VERBOSE,
 )
 
-# Fast way to split a string of 6 characters in to 3 pairs of 2 characters
+# Fast way to split a string of 6 characters into 3 pairs of 2 characters
 _split_pairs3: Callable[[str], tuple[str, str, str]] = itemgetter(
     slice(0, 2), slice(2, 4), slice(4, 6)
 )
-# Fast way to split a string of 8 characters in to 4 pairs of 2 characters
+# Fast way to split a string of 8 characters into 4 pairs of 2 characters
 _split_pairs4: Callable[[str], tuple[str, str, str, str]] = itemgetter(
     slice(0, 2), slice(2, 4), slice(4, 6), slice(6, 8)
 )
@@ -166,33 +166,80 @@ class Color(NamedTuple):
     """Blue component in range 0 to 255."""
     a: float = 1.0
     """Alpha (opacity) component in range 0 to 1."""
+    ansi: int | None = None
+    """ANSI color index. `-1` means default color. `None` if not an ANSI color."""
+    auto: bool = False
+    """Is the color automatic? (automatic colors may be white or black, to provide maximum contrast)"""
 
     @classmethod
-    def from_rich_color(cls, rich_color: RichColor) -> Color:
+    def automatic(cls, alpha_percentage: float = 100.0) -> Color:
+        """Create an automatic color."""
+        return cls(0, 0, 0, alpha_percentage / 100.0, auto=True)
+
+    @classmethod
+    @lru_cache(maxsize=1024)
+    def from_rich_color(
+        cls,
+        rich_color: RichColor | None,
+        theme: TerminalTheme | None = None,
+        foreground: bool = True,
+        ansi: bool = True,
+    ) -> Color:
         """Create a new color from Rich's Color class.
 
         Args:
             rich_color: An instance of [Rich color][rich.color.Color].
+            theme: Optional Rich [terminal theme][rich.terminal_theme.TerminalTheme].
+            foreground: Is the color a foreground color (`False`) or a background color (`True`)?
+            ansi: Return ANSI colors if `True`, or attempt to convert to RGV if `False`.
 
         Returns:
             A new Color instance.
         """
-        r, g, b = rich_color.get_truecolor()
-        return cls(r, g, b)
+        if rich_color is None:
+            return TRANSPARENT
+        if ansi:
+            if rich_color.triplet is not None:
+                r, g, b = rich_color.triplet
+            else:
+                r, g, b = 0, 0, 0
+            if rich_color.type == ColorType.DEFAULT:
+                return Color(r, g, b, ansi=-1)
+            elif rich_color.type == ColorType.STANDARD:
+                return Color(r, g, b, ansi=rich_color.number)
+        r, g, b = rich_color.get_truecolor(theme, foreground=foreground)
+        return cls(
+            r, g, b, ansi=rich_color.number if rich_color.is_system_defined else None
+        )
 
     @classmethod
     def from_hsl(cls, h: float, s: float, l: float) -> Color:
-        """Create a color from HLS components.
+        """Create a color from HSL components.
 
         Args:
             h: Hue.
-            l: Lightness.
             s: Saturation.
+            l: Lightness.
 
         Returns:
             A new color.
         """
         r, g, b = hls_to_rgb(h, l, s)
+        return cls(int(r * 255 + 0.5), int(g * 255 + 0.5), int(b * 255 + 0.5))
+
+    @classmethod
+    def from_hsv(cls, h: float, s: float, v: float) -> Color:
+        """Create a color from HSV components.
+
+        Args:
+            h: Hue.
+            s: Saturation.
+            v: Value.
+
+        Returns:
+            A new color.
+        """
+        r, g, b = hsv_to_rgb(h, s, v)
         return cls(int(r * 255 + 0.5), int(g * 255 + 0.5), int(b * 255 + 0.5))
 
     @property
@@ -202,35 +249,40 @@ class Color(NamedTuple):
         Returns:
             Inverse color.
         """
-        r, g, b, a = self
+        r, g, b, a, _, _ = self
         return Color(255 - r, 255 - g, 255 - b, a)
 
     @property
     def is_transparent(self) -> bool:
         """Is the color transparent (i.e. has 0 alpha)?"""
-        return self.a == 0
+        return self.a == 0 and self.ansi is None
 
     @property
     def clamped(self) -> Color:
         """A clamped color (this color with all values in expected range)."""
-        r, g, b, a = self
+        r, g, b, a, ansi, auto = self
         _clamp = clamp
         color = Color(
             _clamp(r, 0, 255),
             _clamp(g, 0, 255),
             _clamp(b, 0, 255),
             _clamp(a, 0.0, 1.0),
+            ansi,
+            auto,
         )
         return color
 
     @property
+    @lru_cache(1024)
     def rich_color(self) -> RichColor:
         """This color encoded in Rich's Color class.
 
         Returns:
             A color object as used by Rich.
         """
-        r, g, b, _a = self
+        r, g, b, a, ansi, _ = self
+        if ansi is not None:
+            return RichColor.parse("default") if ansi < 0 else RichColor.from_ansi(ansi)
         return RichColor(
             f"#{r:02x}{g:02x}{b:02x}", _TRUECOLOR, None, ColorTriplet(r, g, b)
         )
@@ -242,13 +294,13 @@ class Color(NamedTuple):
         Returns:
             Normalized components.
         """
-        r, g, b, _a = self
+        r, g, b, _a, _, _ = self
         return (r / 255, g / 255, b / 255)
 
     @property
     def rgb(self) -> tuple[int, int, int]:
         """The red, green, and blue color components as a tuple of ints."""
-        r, g, b, _ = self
+        r, g, b, _, _, _ = self
         return (r, g, b)
 
     @property
@@ -265,6 +317,19 @@ class Color(NamedTuple):
         return HSL(h, s, l)
 
     @property
+    def hsv(self) -> HSV:
+        """This color in HSV format.
+
+        HSV color is an alternative way of representing a color, which can be used in certain color calculations.
+
+        Returns:
+            Color encoded in HSV format.
+        """
+        r, g, b = self.normalized
+        h, s, v = rgb_to_hsv(r, g, b)
+        return HSV(h, s, v)
+
+    @property
     def brightness(self) -> float:
         """The human perceptual brightness.
 
@@ -279,9 +344,11 @@ class Color(NamedTuple):
     def hex(self) -> str:
         """The color in CSS hex form, with 6 digits for RGB, and 8 digits for RGBA.
 
-        For example, `"#46b3de"` for an RGB color, or `"#3342457f"` for a color with alpha.
+        For example, `"#46B3DE"` for an RGB color, or `"#3342457F"` for a color with alpha.
         """
-        r, g, b, a = self.clamped
+        r, g, b, a, ansi, _ = self.clamped
+        if ansi is not None:
+            return "ansi_default" if ansi == -1 else f"ansi_{ANSI_COLORS[ansi]}"
         return (
             f"#{r:02X}{g:02X}{b:02X}"
             if a == 1
@@ -292,9 +359,9 @@ class Color(NamedTuple):
     def hex6(self) -> str:
         """The color in CSS hex form, with 6 digits for RGB. Alpha is ignored.
 
-        For example, `"#46b3de"`.
+        For example, `"#46B3DE"`.
         """
-        r, g, b, _a = self.clamped
+        r, g, b, _a, _, _ = self.clamped
         return f"#{r:02X}{g:02X}{b:02X}"
 
     @property
@@ -303,7 +370,16 @@ class Color(NamedTuple):
 
         For example, `"rgb(10,20,30)"` for an RGB color, or `"rgb(50,70,80,0.5)"` for an RGBA color.
         """
-        r, g, b, a = self
+        r, g, b, a, ansi, auto = self
+        if auto:
+            alpha_percentage = clamp(a, 0.0, 1.0) * 100.0
+            if alpha_percentage == 100:
+                return "auto"
+            if not alpha_percentage % 1:
+                return f"auto {int(alpha_percentage)}%"
+            return f"auto {alpha_percentage:.1f}%"
+        if ansi is not None:
+            return "ansi_default" if ansi == -1 else f"ansi_{ANSI_COLORS[ansi]}"
         return f"rgb({r},{g},{b})" if a == 1 else f"rgba({r},{g},{b},{a})"
 
     @property
@@ -313,16 +389,18 @@ class Color(NamedTuple):
         Returns:
             The monochrome (black and white) version of this color.
         """
-        r, g, b, a = self
+        r, g, b, a, _, _ = self
         gray = round(r * 0.2126 + g * 0.7152 + b * 0.0722)
         return Color(gray, gray, gray, a)
 
     def __rich_repr__(self) -> rich.repr.Result:
-        r, g, b, a = self
+        r, g, b, a, ansi, auto = self
         yield r
         yield g
         yield b
         yield "a", a, 1.0
+        yield "ansi", ansi, None
+        yield "auto", auto, False
 
     def with_alpha(self, alpha: float) -> Color:
         """Create a new color with the given alpha.
@@ -333,7 +411,7 @@ class Color(NamedTuple):
         Returns:
             A new color.
         """
-        r, g, b, _ = self
+        r, g, b, _, _, _ = self
         return Color(r, g, b, alpha)
 
     def multiply_alpha(self, alpha: float) -> Color:
@@ -345,8 +423,10 @@ class Color(NamedTuple):
         Returns:
             A new color.
         """
-        r, g, b, a = self
-        return Color(r, g, b, a * alpha)
+        if self.ansi is not None:
+            return self
+        r, g, b, a, _ansi, auto = self
+        return Color(r, g, b, a * alpha, auto=auto)
 
     @lru_cache(maxsize=1024)
     def blend(
@@ -366,12 +446,16 @@ class Color(NamedTuple):
         Returns:
             A new color.
         """
+        if destination.auto:
+            destination = self.get_contrast_text(destination.a)
+        if destination.ansi is not None:
+            return destination
         if factor <= 0:
             return self
         elif factor >= 1:
             return destination
-        r1, g1, b1, a1 = self
-        r2, g2, b2, a2 = destination
+        r1, g1, b1, a1, _, _ = self
+        r2, g2, b2, a2, _, _ = destination
 
         if alpha is None:
             new_alpha = a1 + (a2 - a1) * factor
@@ -385,9 +469,44 @@ class Color(NamedTuple):
             new_alpha,
         )
 
+    @lru_cache(maxsize=1024)
+    def tint(self, color: Color) -> Color:
+        """Apply a tint to a color.
+
+        Similar to blend, but combines color and alpha.
+
+        Args:
+            color: A color with alpha component.
+
+        Returns:
+            New color
+        """
+
+        r1, g1, b1, a1, ansi1, _ = self
+        if ansi1 is not None:
+            return self
+        r2, g2, b2, a2, ansi2, _ = color
+        if ansi2 is not None:
+            return self
+        return Color(
+            int(r1 + (r2 - r1) * a2),
+            int(g1 + (g2 - g1) * a2),
+            int(b1 + (b2 - b1) * a2),
+            a1,
+        )
+
     def __add__(self, other: object) -> Color:
         if isinstance(other, Color):
             return self.blend(other, other.a, 1.0)
+        elif other is None:
+            return self
+        return NotImplemented
+
+    def __radd__(self, other: object) -> Color:
+        if isinstance(other, Color):
+            return self.blend(other, other.a, 1.0)
+        elif other is None:
+            return self
         return NotImplemented
 
     @classmethod
@@ -433,6 +552,15 @@ class Color(NamedTuple):
         """
         if isinstance(color_text, Color):
             return color_text
+        if color_text == "ansi_default":
+            return cls(0, 0, 0, ansi=-1)
+        if color_text.startswith("ansi_"):
+            try:
+                ansi = ANSI_COLORS.index(color_text[5:])
+            except ValueError:
+                pass
+            else:
+                return cls(*COLOR_NAME_TO_RGB.get(color_text), ansi=ansi)
         color_from_name = COLOR_NAME_TO_RGB.get(color_text)
         if color_from_name is not None:
             return cls(*color_from_name)
@@ -502,7 +630,7 @@ class Color(NamedTuple):
             l = percentage_string_to_float(l)
             a = clamp(float(a), 0.0, 1.0)
             color = Color.from_hsl(h, s, l).with_alpha(a)
-        else:
+        else:  # pragma: no-cover
             raise AssertionError(  # pragma: no-cover
                 "Can't get here if RE_COLOR matches"
             )
@@ -551,25 +679,83 @@ class Color(NamedTuple):
 class Gradient:
     """Defines a color gradient."""
 
-    def __init__(self, *stops: tuple[float, Color]) -> None:
+    def __init__(self, *stops: tuple[float, Color | str], quality: int = 50) -> None:
         """Create a color gradient that blends colors to form a spectrum.
 
-        A gradient is defined by a sequence of "stops" consisting of a float and a color.
-        The stop indicate the color at that point on a spectrum between 0 and 1.
+        A gradient is defined by a sequence of "stops" consisting of a tuple containing a float and a color.
+        The stop indicates the color at that point on a spectrum between 0 and 1.
+        Colors may be given as a [Color][textual.color.Color] instance, or a string that
+        can be parsed into a Color (with [Color.parse][textual.color.Color.parse]).
+
+        The `quality` argument defines the number of _steps_ in the gradient. Intermediate colors are
+        interpolated from the two nearest colors. Increasing `quality` can generate a smoother looking gradient,
+        at the expense of a little extra work to pre-calculate the colors.
 
         Args:
-            stops: A colors stop.
+            stops: Color stops.
+            quality: The number of steps in the gradient.
 
         Raises:
             ValueError: If any stops are missing (must be at least a stop for 0 and 1).
         """
-        self._stops = sorted(stops)
+        parse = Color.parse
+        self._stops = sorted(
+            [
+                (
+                    (position, parse(color))
+                    if isinstance(color, str)
+                    else (position, color)
+                )
+                for position, color in stops
+            ]
+        )
         if len(stops) < 2:
             raise ValueError("At least 2 stops required.")
         if self._stops[0][0] != 0.0:
             raise ValueError("First stop must be 0.")
         if self._stops[-1][0] != 1.0:
             raise ValueError("Last stop must be 1.")
+        self._quality = quality
+        self._colors: list[Color] | None = None
+        self._rich_colors: list[RichColor] | None = None
+
+    @classmethod
+    def from_colors(cls, *colors: Color | str, quality: int = 50) -> Gradient:
+        """Construct a gradient form a sequence of colors, where the stops are evenly spaced.
+
+        Args:
+            *colors: Positional arguments may be Color instances or strings to parse into a color.
+            quality: The number of steps in the gradient.
+
+        Returns:
+            A new Gradient instance.
+        """
+        if len(colors) < 2:
+            raise ValueError("Two or more colors required.")
+        stops = [(i / (len(colors) - 1), Color.parse(c)) for i, c in enumerate(colors)]
+        return cls(*stops, quality=quality)
+
+    @property
+    def colors(self) -> list[Color]:
+        """A list of colors in the gradient."""
+        position = 0
+        quality = self._quality
+
+        if self._colors is None:
+            colors: list[Color] = []
+            add_color = colors.append
+            (stop1, color1), (stop2, color2) = self._stops[0:2]
+            for step_position in range(quality):
+                step = step_position / (quality - 1)
+                while step > stop2:
+                    position += 1
+                    (stop1, color1), (stop2, color2) = self._stops[
+                        position : position + 2
+                    ]
+                add_color(color1.blend(color2, (step - stop1) / (stop2 - stop1)))
+            self._colors = colors
+        assert len(self._colors) == self._quality
+        return self._colors
 
     def get_color(self, position: float) -> Color:
         """Get a color from the gradient at a position between 0 and 1.
@@ -580,17 +766,31 @@ class Gradient:
             position: A number between 0 and 1, where 0 is the first stop, and 1 is the last.
 
         Returns:
-            A color.
+            A Textual color.
         """
-        # TODO: consider caching
-        position = clamp(position, 0.0, 1.0)
-        for (stop1, color1), (stop2, color2) in zip(self._stops, self._stops[1:]):
-            if stop2 >= position >= stop1:
-                return color1.blend(
-                    color2,
-                    (position - stop1) / (stop2 - stop1),
-                )
-        raise AssertionError("Can't get here if `_stops` is valid")
+
+        if position <= 0:
+            return self.colors[0]
+        if position >= 1:
+            return self.colors[-1]
+
+        color_position = position * (self._quality - 1)
+        color_index = int(color_position)
+        color1, color2 = self.colors[color_index : color_index + 2]
+        return color1.blend(color2, color_position % 1)
+
+    def get_rich_color(self, position: float) -> RichColor:
+        """Get a (Rich) color from the gradient at a position between 0 and 1.
+
+        Positions that are between stops will return a blended color.
+
+        Args:
+            position: A number between 0 and 1, where 0 is the first stop, and 1 is the last.
+
+        Returns:
+            A (Rich) color.
+        """
+        return self.get_color(position).rich_color
 
 
 # Color constants
@@ -598,6 +798,8 @@ WHITE: Final = Color(255, 255, 255)
 """A constant for pure white."""
 BLACK: Final = Color(0, 0, 0)
 """A constant for pure black."""
+TRANSPARENT: Final = Color.parse("transparent")
+"""A constant for transparent."""
 
 
 def rgb_to_lab(rgb: Color) -> Lab:

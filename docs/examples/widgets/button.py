@@ -4,7 +4,7 @@ from textual.widgets import Button, Static
 
 
 class ButtonsApp(App[str]):
-    CSS_PATH = "button.css"
+    CSS_PATH = "button.tcss"
 
     def compose(self) -> ComposeResult:
         yield Horizontal(
@@ -23,6 +23,22 @@ class ButtonsApp(App[str]):
                 Button.success("Success!", disabled=True),
                 Button.warning("Warning!", disabled=True),
                 Button.error("Error!", disabled=True),
+            ),
+            VerticalScroll(
+                Static("Flat Buttons", classes="header"),
+                Button("Default", flat=True),
+                Button("Primary!", variant="primary", flat=True),
+                Button.success("Success!", flat=True),
+                Button.warning("Warning!", flat=True),
+                Button.error("Error!", flat=True),
+            ),
+            VerticalScroll(
+                Static("Disabled Flat Buttons", classes="header"),
+                Button("Default", disabled=True, flat=True),
+                Button("Primary!", variant="primary", disabled=True, flat=True),
+                Button.success("Success!", disabled=True, flat=True),
+                Button.warning("Warning!", disabled=True, flat=True),
+                Button.error("Error!", disabled=True, flat=True),
             ),
         )
 

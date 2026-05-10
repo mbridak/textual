@@ -1,10 +1,9 @@
-from textual import on
 from textual.app import App, ComposeResult
 from textual.widgets import Button
 
 
 class OnDecoratorApp(App):
-    CSS_PATH = "on_decorator.css"
+    CSS_PATH = "on_decorator.tcss"
 
     def compose(self) -> ComposeResult:
         """Three buttons."""
@@ -17,7 +16,9 @@ class OnDecoratorApp(App):
         if event.button.id == "bell":
             self.bell()
         elif event.button.has_class("toggle", "dark"):
-            self.dark = not self.dark
+            self.theme = (
+                "textual-dark" if self.theme == "textual-light" else "textual-light"
+            )
         elif event.button.id == "quit":
             self.exit()
 

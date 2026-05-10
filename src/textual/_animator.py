@@ -8,11 +8,12 @@ from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
 from typing_extensions import Protocol, runtime_checkable
 
-from . import _time
-from ._callback import invoke
-from ._easing import DEFAULT_EASING, EASING
-from ._types import CallbackType
-from .timer import Timer
+from textual import _time
+from textual._callback import invoke
+from textual._compat import cached_property
+from textual._easing import DEFAULT_EASING, EASING
+from textual._types import AnimationLevel, CallbackType
+from textual.timer import Timer
 
 if TYPE_CHECKING:
     from textual.app import App
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
     """Animation keys are the id of the object and the attribute being animated."""
 
 EasingFunction = Callable[[float], float]
-"""Signature for a function that parametrises animation speed.
+"""Signature for a function that parametrizes animation speed.
 
 An easing function must map the interval [0, 1] into the interval [0, 1].
 """
@@ -53,7 +54,11 @@ class Animation(ABC):
     """Callback to run after animation completes"""
 
     @abstractmethod
-    def __call__(self, time: float) -> bool:  # pragma: no cover
+    def __call__(
+        self,
+        time: float,
+        app_animation_level: AnimationLevel = "full",
+    ) -> bool:  # pragma: no cover
         """Call the animation, return a boolean indicating whether animation is in-progress or complete.
 
         Args:
@@ -93,9 +98,18 @@ class SimpleAnimation(Animation):
     final_value: object
     easing: EasingFunction
     on_complete: CallbackType | None = None
+    level: AnimationLevel = "full"
+    """Minimum level required for the animation to take place (inclusive)."""
 
-    def __call__(self, time: float) -> bool:
-        if self.duration == 0:
+    def __call__(
+        self, time: float, app_animation_level: AnimationLevel = "full"
+    ) -> bool:
+        if (
+            self.duration == 0
+            or app_animation_level == "none"
+            or app_animation_level == "basic"
+            and self.level == "full"
+        ):
             setattr(self.obj, self.attribute, self.final_value)
             return True
 
@@ -170,6 +184,7 @@ class BoundAnimator:
         delay: float = 0.0,
         easing: EasingFunction | str = DEFAULT_EASING,
         on_complete: CallbackType | None = None,
+        level: AnimationLevel = "full",
     ) -> None:
         """Animate an attribute.
 
@@ -177,11 +192,12 @@ class BoundAnimator:
             attribute: Name of the attribute to animate.
             value: The value to animate to.
             final_value: The final value of the animation. Defaults to `value` if not set.
-            duration: The duration of the animate.
+            duration: The duration (in seconds) of the animation.
             speed: The speed of the animation.
             delay: A delay (in seconds) before the animation starts.
             easing: An easing method.
             on_complete: A callable to invoke when the animation is finished.
+            level: Minimum level required for the animation to take place (inclusive).
         """
         start_value = getattr(self._obj, attribute)
         if isinstance(value, str) and hasattr(start_value, "parse"):
@@ -200,6 +216,7 @@ class BoundAnimator:
             delay=delay,
             easing=easing_function,
             on_complete=on_complete,
+            level=level,
         )
 
 
@@ -226,11 +243,16 @@ class Animator:
             callback=self,
             pause=True,
         )
+
+    @cached_property
+    def _idle_event(self) -> asyncio.Event:
         """The timer that runs the animator."""
-        self._idle_event = asyncio.Event()
+        return asyncio.Event()
+
+    @cached_property
+    def _complete_event(self) -> asyncio.Event:
         """Flag if no animations are currently taking place."""
-        self._complete_event = asyncio.Event()
-        """Flag if no animations are currently taking place and none are scheduled."""
+        return asyncio.Event()
 
     async def start(self) -> None:
         """Start the animator task."""
@@ -284,6 +306,7 @@ class Animator:
         easing: EasingFunction | str = DEFAULT_EASING,
         delay: float = 0.0,
         on_complete: CallbackType | None = None,
+        level: AnimationLevel = "full",
     ) -> None:
         """Animate an attribute to a new value.
 
@@ -297,7 +320,9 @@ class Animator:
             easing: An easing function.
             delay: Number of seconds to delay the start of the animation by.
             on_complete: Callback to run after the animation completes.
+            level: Minimum level required for the animation to take place (inclusive).
         """
+        self._record_animation(attribute)
         animate_callback = partial(
             self._animate,
             obj,
@@ -308,6 +333,7 @@ class Animator:
             speed=speed,
             easing=easing,
             on_complete=on_complete,
+            level=level,
         )
         if delay:
             self._complete_event.clear()
@@ -316,6 +342,13 @@ class Animator:
             )
         else:
             animate_callback()
+
+    def _record_animation(self, attribute: str) -> None:
+        """Called when an attribute is to be animated.
+
+        Args:
+            attribute: Attribute being animated.
+        """
 
     def _animate(
         self,
@@ -328,7 +361,8 @@ class Animator:
         speed: float | None = None,
         easing: EasingFunction | str = DEFAULT_EASING,
         on_complete: CallbackType | None = None,
-    ):
+        level: AnimationLevel = "full",
+    ) -> None:
         """Animate an attribute to a new value.
 
         Args:
@@ -340,6 +374,7 @@ class Animator:
             speed: The speed of the animation.
             easing: An easing function.
             on_complete: Callback to run after the animation completes.
+            level: Minimum level required for the animation to take place (inclusive).
         """
         if not hasattr(obj, attribute):
             raise AttributeError(
@@ -349,6 +384,7 @@ class Animator:
             duration is None and speed is not None
         ), "An Animation should have a duration OR a speed"
 
+        # If an animation is already scheduled for this attribute, unschedule it.
         animation_key = (id(obj), attribute)
         try:
             del self._scheduled[animation_key]
@@ -359,9 +395,7 @@ class Animator:
             final_value = value
 
         start_time = self._get_time()
-
         easing_function = EASING[easing] if isinstance(easing, str) else easing
-
         animation: Animation | None = None
 
         if hasattr(obj, "__textual_animation__"):
@@ -374,6 +408,7 @@ class Animator:
                 speed=speed,
                 easing=easing_function,
                 on_complete=on_complete,
+                level=level,
             )
 
         if animation is None:
@@ -386,9 +421,10 @@ class Animator:
                 )
 
             start_value = getattr(obj, attribute)
-
             if start_value == value:
                 self._animations.pop(animation_key, None)
+                if on_complete is not None:
+                    self.app.call_later(on_complete)
                 return
 
             if duration is not None:
@@ -410,13 +446,19 @@ class Animator:
                 end_value=value,
                 final_value=final_value,
                 easing=easing_function,
-                on_complete=on_complete,
+                on_complete=(
+                    partial(self.app.call_later, on_complete)
+                    if on_complete is not None
+                    else None
+                ),
+                level=level,
             )
+
         assert animation is not None, "animation expected to be non-None"
 
-        current_animation = self._animations.get(animation_key)
-        if current_animation is not None and current_animation == animation:
-            return
+        if (current_animation := self._animations.get(animation_key)) is not None:
+            if (on_complete := current_animation.on_complete) is not None:
+                self.app.call_later(on_complete)
 
         self._animations[animation_key] = animation
         self._timer.resume()
@@ -484,21 +526,50 @@ class Animator:
         elif key in self._animations:
             await self._stop_running_animation(key, complete)
 
-    async def __call__(self) -> None:
+    def force_stop_animation(self, obj: object, attribute: str) -> None:
+        """Force stop an animation on an attribute. This will immediately stop the animation,
+        without running any associated callbacks, setting the attribute to its final value.
+
+        Args:
+            obj: The object containing the attribute.
+            attribute: The name of the attribute.
+
+        Note:
+            If there is no animation scheduled or running, this is a no-op.
+        """
+        from textual.css.scalar_animation import ScalarAnimation
+
+        animation_key = (id(obj), attribute)
+        try:
+            animation = self._animations.pop(animation_key)
+        except KeyError:
+            return
+
+        if isinstance(animation, SimpleAnimation):
+            setattr(obj, attribute, animation.end_value)
+        elif isinstance(animation, ScalarAnimation):
+            setattr(obj, attribute, animation.final_value)
+
+        if animation.on_complete is not None:
+            animation.on_complete()
+
+    def __call__(self) -> None:
         if not self._animations:
             self._timer.pause()
             self._idle_event.set()
             if not self._scheduled:
                 self._complete_event.set()
         else:
+            app_animation_level = self.app.animation_level
             animation_time = self._get_time()
             animation_keys = list(self._animations.keys())
             for animation_key in animation_keys:
                 animation = self._animations[animation_key]
-                animation_complete = animation(animation_time)
+                animation_complete = animation(animation_time, app_animation_level)
                 if animation_complete:
                     del self._animations[animation_key]
-                    await animation.invoke_callback()
+                    if animation.on_complete is not None:
+                        animation.on_complete()
 
     def _get_time(self) -> float:
         """Get the current wall clock time, via the internal Timer.
@@ -507,7 +578,7 @@ class Animator:
             The wall clock time.
         """
         # N.B. We could remove this method and always call `self._timer.get_time()` internally,
-        # but it's handy to have in mocking situations
+        # but it's handy to have in mocking situations.
         return _time.get_time()
 
     async def wait_for_idle(self) -> None:

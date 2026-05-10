@@ -13,7 +13,7 @@ class MyApp(App[None]):
         height: 21;
     }
     HorizontalScroll {
-        border: round $secondary;
+        border: round $accent;
         height: auto;
     }
     Label {
@@ -35,7 +35,7 @@ class MyApp(App[None]):
         yield Label(("SPAM\n" * 51)[:-1])
 
     def key_s(self) -> None:
-        self.screen.scroll_to_center(self.query_one("#bullseye"))
+        self.screen.scroll_to_center(self.query_one("#bullseye"), origin_visible=False)
 
 
 if __name__ == "__main__":

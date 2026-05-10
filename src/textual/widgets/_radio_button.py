@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ._toggle_button import ToggleButton
+from textual.widgets._toggle_button import ToggleButton
 
 
 class RadioButton(ToggleButton):
@@ -12,7 +12,7 @@ class RadioButton(ToggleButton):
         A `RadioButton` is best used within a [RadioSet][textual.widgets.RadioSet].
     """
 
-    BUTTON_INNER = "\u25CF"
+    BUTTON_INNER = "\u25cf"
     """The character used for the inside of the button."""
 
     class Changed(ToggleButton.Changed):

@@ -23,10 +23,10 @@ Clicking any of the non-disabled buttons in the example app below will result in
     --8<-- "docs/examples/widgets/button.py"
     ```
 
-=== "button.css"
+=== "button.tcss"
 
-    ```sass
-    --8<-- "docs/examples/widgets/button.css"
+    ```css
+    --8<-- "docs/examples/widgets/button.tcss"
     ```
 
 ## Reactive Attributes
@@ -41,9 +41,17 @@ Clicking any of the non-disabled buttons in the example app below will result in
 
 - [Button.Pressed][textual.widgets.Button.Pressed]
 
+## Bindings
+
+This widget has no bindings.
+
+## Component Classes
+
+This widget has no component classes.
+
 ## Additional Notes
 
-- The spacing between the text and the edges of a button are _not_ due to padding. The default styling for a `Button` has the `height` set to 3 lines and a `min-width` of 16 columns. To create a button with zero visible padding, you will need to change these values and also remove the border with `border: none;`.
+- The spacing between the text and the edges of a button are _not_ due to padding. The default styling for a `Button` includes borders and a `min-width` of 16 columns. To remove the spacing, set `border: none;` in your CSS and adjust the minimum width as needed.
 
 ---
 

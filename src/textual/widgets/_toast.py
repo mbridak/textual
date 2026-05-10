@@ -4,15 +4,13 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from rich.console import RenderableType
-from rich.text import Text
-
-from .. import on
-from ..containers import Container
-from ..css.query import NoMatches
-from ..events import Click, Mount
-from ..notifications import Notification, Notifications
-from ._static import Static
+from textual import on
+from textual.containers import Container
+from textual.content import Content
+from textual.css.query import NoMatches
+from textual.events import Click, Mount
+from textual.notifications import Notification, Notifications
+from textual.widgets._static import Static
 
 
 class ToastHolder(Container, inherit_css=False):
@@ -27,7 +25,7 @@ class ToastHolder(Container, inherit_css=False):
         align-horizontal: right;
         width: 1fr;
         height: auto;
-        visibility: hidden;
+        visibility: hidden;        
     }
     """
 
@@ -40,43 +38,49 @@ class Toast(Static, inherit_css=False):
         width: 60;
         max-width: 50%;
         height: auto;
-        visibility: visible;
         margin-top: 1;
+        visibility: visible;        
         padding: 1 1;
-        background: $panel;
-        tint: white 5%;
+        background: $panel-lighten-1;
+        link-background: initial;
+        link-color: $foreground;
+        link-style: underline;
+        link-background-hover: $primary;
+        link-color-hover: $foreground;
+        link-style-hover: bold not underline;
+
+        &:ansi {
+            background: $ansi-background;
+        }
     }
 
     .toast--title {
         text-style: bold;
-    }
-
-    Toast {
-        border-right: wide $background;
+        color: $foreground;
     }
 
     Toast.-information {
-        border-left: wide $success;
+        border-left: outer $success;
     }
 
     Toast.-information .toast--title {
-        color: $success-darken-1;
+        color: $text-success;
     }
 
     Toast.-warning {
-        border-left: wide $warning;
+        border-left: outer $warning;
     }
 
     Toast.-warning .toast--title {
-        color: $warning-darken-1;
+        color: $text-warning;
     }
 
     Toast.-error {
-        border-left: wide $error;
+        border-left: outer $error;
     }
 
     Toast.-error .toast--title {
-       color: $error-darken-1;
+       color: $text-error;
     }
     """
 
@@ -86,6 +90,8 @@ class Toast(Static, inherit_css=False):
     | :- | :- |
     | `toast--title` | Targets the title of the toast. |
     """
+
+    DEFAULT_CLASSES = "-textual-system"
 
     def __init__(self, notification: Notification) -> None:
         """Initialise the toast.
@@ -97,25 +103,27 @@ class Toast(Static, inherit_css=False):
         self._notification = notification
         self._timeout = notification.time_left
 
-    def render(self) -> RenderableType:
+    def render(self) -> Content:
         """Render the toast's content.
 
         Returns:
             A Rich renderable for the title and content of the Toast.
         """
         notification = self._notification
+
+        message_content = (
+            Content.from_markup(notification.message)
+            if notification.markup
+            else Content(notification.message)
+        )
+
         if notification.title:
-            header_style = self.get_component_rich_style("toast--title")
-            notification_text = Text.assemble(
-                (notification.title, header_style),
-                "\n",
-                Text.from_markup(notification.message),
+            header_style = self.get_visual_style("toast--title")
+            message_content = Content.assemble(
+                (notification.title, header_style), "\n", message_content
             )
-        else:
-            notification_text = Text.assemble(
-                Text.from_markup(notification.message),
-            )
-        return notification_text
+
+        return message_content
 
     def _on_mount(self, _: Mount) -> None:
         """Set the time running once the toast is mounted."""
@@ -128,7 +136,7 @@ class Toast(Static, inherit_css=False):
         # the notification that caused us to exist. Note that we tell the
         # app to not bother refreshing the display on our account, we're
         # about to handle that anyway.
-        self.app.unnotify(self._notification, refresh=False)
+        self.app._unnotify(self._notification, refresh=False)
         # Note that we attempt to remove our parent, because we're wrapped
         # inside an alignment container. The testing that we are is as much
         # to keep type checkers happy as anything else.
@@ -140,18 +148,19 @@ class ToastRack(Container, inherit_css=False):
 
     DEFAULT_CSS = """
     ToastRack {
+        display: none;
         layer: _toastrack;
         width: 1fr;
         height: auto;
-        dock: top;
+        dock: bottom;
         align: right bottom;
         visibility: hidden;
         layout: vertical;
         overflow-y: scroll;
-        margin-bottom: 1;
-        margin-right: 1;
+        margin-bottom: 1;         
     }
     """
+    DEFAULT_CLASSES = "-textual-system"
 
     @staticmethod
     def _toast_id(notification: Notification) -> str:
@@ -171,7 +180,7 @@ class ToastRack(Container, inherit_css=False):
         Args:
             notifications: The notifications to show.
         """
-
+        self.display = bool(notifications)
         # Look for any stale toasts and remove them.
         for toast in self.query(Toast):
             if toast._notification not in notifications:

@@ -1,5 +1,8 @@
 """
-A class to manage concurrent [work](/guide/workers).
+This module contains the `Worker` class and related objects.
+
+See the guide for how to use [workers](/guide/workers).
+
 """
 
 from __future__ import annotations
@@ -8,6 +11,7 @@ import asyncio
 import enum
 import inspect
 from contextvars import ContextVar
+from threading import Event
 from time import monotonic
 from typing import (
     TYPE_CHECKING,
@@ -21,14 +25,13 @@ from typing import (
 )
 
 import rich.repr
-from rich.traceback import Traceback
 from typing_extensions import TypeAlias
 
-from .message import Message
+from textual.message import Message
 
 if TYPE_CHECKING:
-    from .app import App
-    from .dom import DOMNode
+    from textual.app import App
+    from textual.dom import DOMNode
 
 
 active_worker: ContextVar[Worker] = ContextVar("active_worker")
@@ -138,7 +141,7 @@ class Worker(Generic[ResultType]):
     def __init__(
         self,
         node: DOMNode,
-        work: WorkType | None = None,
+        work: WorkType,
         *,
         name: str = "",
         group: str = "default",
@@ -161,8 +164,12 @@ class Worker(Generic[ResultType]):
         self._work = work
         self.name = name
         self.group = group
-        self.description = description
+        self.description = (
+            description if len(description) <= 1000 else description[:1000] + "..."
+        )
         self.exit_on_error = exit_on_error
+        self.cancelled_event: Event = Event()
+        """A threading event set when the worker is cancelled."""
         self._thread_worker = thread
         self._state = WorkerState.PENDING
         self.state = self._state
@@ -291,7 +298,7 @@ class Worker(Generic[ResultType]):
             return asyncio.run(do_work())
 
         def run_coroutine(
-            work: Callable[[], Coroutine[None, None, ResultType]]
+            work: Callable[[], Coroutine[None, None, ResultType]],
         ) -> ResultType:
             """Set the active worker and await coroutine."""
             return run_awaitable(work())
@@ -314,9 +321,9 @@ class Worker(Generic[ResultType]):
         else:
             raise WorkerError("Unsupported attempt to run a thread worker")
 
-        return await asyncio.get_running_loop().run_in_executor(
-            None, runner, self._work
-        )
+        loop = asyncio.get_running_loop()
+        assert loop is not None
+        return await loop.run_in_executor(None, runner, self._work)
 
     async def _run_async(self) -> ResultType:
         """Run an async worker.
@@ -354,27 +361,30 @@ class Worker(Generic[ResultType]):
         Args:
             app: App instance.
         """
-        app._set_active()
-        active_worker.set(self)
+        with app._context():
+            active_worker.set(self)
 
-        self.state = WorkerState.RUNNING
-        app.log.worker(self)
-        try:
-            self._result = await self.run()
-        except asyncio.CancelledError as error:
-            self.state = WorkerState.CANCELLED
-            self._error = error
+            self.state = WorkerState.RUNNING
             app.log.worker(self)
-        except Exception as error:
-            self.state = WorkerState.ERROR
-            self._error = error
-            app.log.worker(self, "failed", repr(error))
-            app.log.worker(Traceback())
-            if self.exit_on_error:
-                app._fatal_error()
-        else:
-            self.state = WorkerState.SUCCESS
-            app.log.worker(self)
+            try:
+                self._result = await self.run()
+            except asyncio.CancelledError as error:
+                self.state = WorkerState.CANCELLED
+                self._error = error
+                app.log.worker(self)
+            except Exception as error:
+                self.state = WorkerState.ERROR
+                self._error = error
+                app.log.worker(self, "failed", repr(error))
+                from rich.traceback import Traceback
+
+                app.log.worker(Traceback())
+                if self.exit_on_error:
+                    worker_failed = WorkerFailed(self._error)
+                    app._handle_exception(worker_failed)
+            else:
+                self.state = WorkerState.SUCCESS
+                app.log.worker(self)
 
     def _start(
         self, app: App, done_callback: Callable[[Worker], None] | None = None
@@ -408,6 +418,7 @@ class Worker(Generic[ResultType]):
         self._cancelled = True
         if self._task is not None:
             self._task.cancel()
+        self.cancelled_event.set()
 
     async def wait(self) -> ResultType:
         """Wait for the work to complete.

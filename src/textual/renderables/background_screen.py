@@ -6,10 +6,10 @@ from rich.console import Console, ConsoleOptions, RenderResult
 from rich.segment import Segment
 from rich.style import Style
 
-from ..color import Color
+from textual.color import Color
 
 if TYPE_CHECKING:
-    from ..screen import Screen
+    from textual.screen import Screen
 
 
 class BackgroundScreen:
@@ -49,6 +49,21 @@ class BackgroundScreen:
         _Segment = Segment
 
         NULL_STYLE = Style()
+
+        if color.a == 0:
+            # Special case for transparent color
+            for segment in segments:
+                text, style, control = segment
+                if control:
+                    yield segment
+                else:
+                    yield _Segment(
+                        text,
+                        NULL_STYLE if style is None else style.clear_meta_and_links(),
+                        control,
+                    )
+            return
+
         for segment in segments:
             text, style, control = segment
             if control:

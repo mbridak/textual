@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import re
-from pathlib import PurePath
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import rich.repr
 from rich.console import Group, RenderableType
 from rich.highlighter import ReprHighlighter
 from rich.padding import Padding
 from rich.panel import Panel
-from rich.syntax import Syntax
 from rich.text import Text
 
-from ..suggestions import get_suggestion
-from ._error_tools import friendly_list
-from .constants import VALID_PSEUDO_CLASSES
+from textual.css._error_tools import friendly_list
+from textual.css.constants import VALID_PSEUDO_CLASSES
+from textual.suggestions import get_suggestion
+
+if TYPE_CHECKING:
+    from textual.css.types import CSSLocation
 
 
 class TokenError(Exception):
@@ -22,7 +23,7 @@ class TokenError(Exception):
 
     def __init__(
         self,
-        path: str,
+        read_from: CSSLocation,
         code: str,
         start: tuple[int, int],
         message: str,
@@ -30,14 +31,14 @@ class TokenError(Exception):
     ) -> None:
         """
         Args:
-            path: Path to source or "<object>" if source is parsed from a literal.
+            read_from: The location where the CSS was read from.
             code: The code being parsed.
-            start: Line number of the error.
+            start: Line and column number of the error (1-indexed).
             message: A message associated with the error.
-            end: End location of token, or None if not known.
+            end: End location of token (1-indexed), or None if not known.
         """
 
-        self.path = path
+        self.read_from = read_from
         self.code = code
         self.start = start
         self.end = end or start
@@ -49,6 +50,8 @@ class TokenError(Exception):
         Returns:
             A renderable.
         """
+        from rich.syntax import Syntax
+
         line_no = self.start[0]
         # TODO: Highlight column number
         syntax = Syntax(
@@ -58,9 +61,13 @@ class TokenError(Exception):
             line_numbers=True,
             indent_guides=True,
             line_range=(max(0, line_no - 2), line_no + 2),
-            highlight_lines={line_no + 1},
+            highlight_lines={line_no},
         )
-        syntax.stylize_range("reverse bold", self.start, self.end)
+        syntax.stylize_range(
+            "reverse bold",
+            (self.start[0], self.start[1] - 1),
+            (self.end[0], self.end[1] - 1),
+        )
         return Panel(syntax, border_style="red")
 
     def __rich__(self) -> RenderableType:
@@ -72,7 +79,12 @@ class TokenError(Exception):
 
         line_no, col_no = self.start
 
-        errors.append(highlighter(f" {self.path or '<unknown>'}:{line_no}:{col_no}"))
+        path, widget_variable = self.read_from
+        if widget_variable:
+            css_location = f" {path}, {widget_variable}:{line_no}:{col_no}"
+        else:
+            css_location = f" {path}:{line_no}:{col_no}"
+        errors.append(highlighter(css_location))
         errors.append(self._get_snippet())
 
         final_message = "\n".join(
@@ -90,12 +102,21 @@ class TokenError(Exception):
         return Group(*errors)
 
 
-class EOFError(TokenError):
-    pass
+class UnexpectedEnd(TokenError):
+    """Indicates that the text being tokenized ended prematurely."""
 
 
+@rich.repr.auto
 class Expect:
-    def __init__(self, **tokens: str) -> None:
+    """Object that describes the format of tokens."""
+
+    def __init__(self, description: str, **tokens: str) -> None:
+        """Create Expect object.
+
+        Args:
+            description: Description of this class of tokens, used in errors.
+        """
+        self.description = f"Expected {description}"
         self.names = list(tokens.keys())
         self.regexes = list(tokens.values())
         self._regex = re.compile(
@@ -106,9 +127,21 @@ class Expect:
         self.match = self._regex.match
         self.search = self._regex.search
         self._expect_eof = False
+        self._expect_semicolon = True
+        self._extract_text = False
 
-    def expect_eof(self, eof: bool) -> Expect:
+    def expect_eof(self, eof: bool = True) -> Expect:
+        """Expect an end of file."""
         self._expect_eof = eof
+        return self
+
+    def expect_semicolon(self, semicolon: bool = True) -> Expect:
+        """Tokenizer expects text to be terminated with a semi-colon."""
+        self._expect_semicolon = semicolon
+        return self
+
+    def extract_text(self, extract: bool = True) -> Expect:
+        self._extract_text = extract
         return self
 
     def __rich_repr__(self) -> rich.repr.Result:
@@ -122,26 +155,27 @@ class ReferencedBy(NamedTuple):
     code: str
 
 
-@rich.repr.auto
+@rich.repr.auto(angular=True)
 class Token(NamedTuple):
     name: str
     value: str
-    path: str
+    read_from: CSSLocation
     code: str
     location: tuple[int, int]
+    """Token starting location, 0-indexed."""
     referenced_by: ReferencedBy | None = None
 
     @property
     def start(self) -> tuple[int, int]:
-        """Start line and column (1 indexed)."""
+        """Start line and column (1-indexed)."""
         line, offset = self.location
-        return (line + 1, offset)
+        return (line + 1, offset + 1)
 
     @property
     def end(self) -> tuple[int, int]:
-        """End line and column (1 indexed)."""
+        """End line and column (1-indexed)."""
         line, offset = self.location
-        return (line + 1, offset + len(self.value))
+        return (line + 1, offset + len(self.value) + 1)
 
     def with_reference(self, by: ReferencedBy | None) -> "Token":
         """Return a copy of the Token, with reference information attached.
@@ -153,7 +187,7 @@ class Token(NamedTuple):
         return Token(
             name=self.name,
             value=self.value,
-            path=self.path,
+            read_from=self.read_from,
             code=self.code,
             location=self.location,
             referenced_by=by,
@@ -165,21 +199,45 @@ class Token(NamedTuple):
     def __rich_repr__(self) -> rich.repr.Result:
         yield "name", self.name
         yield "value", self.value
-        yield "path", self.path
+        yield (
+            "read_from",
+            self.read_from[0] if not self.read_from[1] else self.read_from,
+        )
         yield "code", self.code if len(self.code) < 40 else self.code[:40] + "..."
         yield "location", self.location
         yield "referenced_by", self.referenced_by, None
 
 
 class Tokenizer:
-    def __init__(self, text: str, path: str | PurePath = "") -> None:
-        self.path = str(path)
+    """Tokenizes Textual CSS."""
+
+    def __init__(self, text: str, read_from: CSSLocation = ("", "")) -> None:
+        """Initialize the tokenizer.
+
+        Args:
+            text: String containing CSS.
+            read_from: Information regarding where the CSS was read from.
+        """
+        self.read_from = read_from
         self.code = text
         self.lines = text.splitlines(keepends=True)
         self.line_no = 0
         self.col_no = 0
 
     def get_token(self, expect: Expect) -> Token:
+        """Get the next token.
+
+        Args:
+            expect: Expect object which describes which tokens may be read.
+
+        Raises:
+            UnexpectedEnd: If there is an unexpected end of file.
+            TokenError: If there is an error with the token.
+
+        Returns:
+            A new Token.
+        """
+
         line_no = self.line_no
         col_no = self.col_no
         if line_no >= len(self.lines):
@@ -187,34 +245,61 @@ class Tokenizer:
                 return Token(
                     "eof",
                     "",
-                    self.path,
+                    self.read_from,
                     self.code,
-                    (line_no + 1, col_no + 1),
+                    (line_no, col_no),
                     None,
                 )
             else:
-                raise EOFError(
-                    self.path,
+                raise UnexpectedEnd(
+                    self.read_from,
                     self.code,
                     (line_no + 1, col_no + 1),
-                    "Unexpected end of file",
+                    (
+                        "Unexpected end of file; did you forget a '}' ?"
+                        if expect._expect_semicolon
+                        else "Unexpected end of text"
+                    ),
                 )
         line = self.lines[line_no]
-        match = expect.match(line, col_no)
+        preceding_text: str = ""
+        if expect._extract_text:
+            match = expect.search(line, col_no)
+            if match is None:
+                preceding_text = line[self.col_no :]
+                self.line_no += 1
+                self.col_no = 0
+            else:
+                col_no = match.start()
+                preceding_text = line[self.col_no : col_no]
+                self.col_no = col_no
+            if preceding_text:
+                token = Token(
+                    "text",
+                    preceding_text,
+                    self.read_from,
+                    self.code,
+                    (line_no, col_no),
+                    referenced_by=None,
+                )
+
+                return token
+
+        else:
+            match = expect.match(line, col_no)
+
         if match is None:
-            expected = friendly_list(" ".join(name.split("_")) for name in expect.names)
-            message = f"Expected one of {expected}.; Did you forget a semicolon at the end of a line?"
-            raise TokenError(
-                self.path,
-                self.code,
-                (line_no, col_no),
-                message,
+            error_line = line[col_no:]
+            error_message = (
+                f"{expect.description} (found {error_line.split(';')[0]!r})."
             )
-        iter_groups = iter(match.groups())
+            if expect._expect_semicolon and not error_line.endswith(";"):
+                error_message += "; Did you forget a semicolon at the end of a line?"
+            raise TokenError(
+                self.read_from, self.code, (line_no + 1, col_no + 1), error_message
+            )
 
-        next(iter_groups)
-
-        for name, value in zip(expect.names, iter_groups):
+        for name, value in zip(expect.names, match.groups()[1:]):
             if value is not None:
                 break
         else:
@@ -224,7 +309,7 @@ class Tokenizer:
         token = Token(
             name,
             value,
-            self.path,
+            self.read_from,
             self.code,
             (line_no, col_no),
             referenced_by=None,
@@ -239,16 +324,16 @@ class Tokenizer:
             all_valid = f"must be one of {friendly_list(VALID_PSEUDO_CLASSES)}"
             if suggestion:
                 raise TokenError(
-                    self.path,
+                    self.read_from,
                     self.code,
-                    (line_no, col_no),
+                    (line_no + 1, col_no + 1),
                     f"unknown pseudo-class {pseudo_class!r}; did you mean {suggestion!r}?; {all_valid}",
                 )
             else:
                 raise TokenError(
-                    self.path,
+                    self.read_from,
                     self.code,
-                    (line_no, col_no),
+                    (line_no + 1, col_no + 1),
                     f"unknown pseudo-class {pseudo_class!r}; {all_valid}",
                 )
 
@@ -261,13 +346,31 @@ class Tokenizer:
         return token
 
     def skip_to(self, expect: Expect) -> Token:
+        """Skip tokens.
+
+        Args:
+            expect: Expect object describing the expected token.
+
+        Raises:
+            UnexpectedEndOfText: If end of file is reached.
+
+        Returns:
+            A new token.
+        """
         line_no = self.line_no
         col_no = self.col_no
 
         while True:
             if line_no >= len(self.lines):
-                raise EOFError(
-                    self.path, self.code, (line_no, col_no), "Unexpected end of file"
+                raise UnexpectedEnd(
+                    self.read_from,
+                    self.code,
+                    (line_no, col_no),
+                    (
+                        "Unexpected end of file; did you forget a '}' ?"
+                        if expect._expect_semicolon
+                        else "Unexpected end of markup"
+                    ),
                 )
             line = self.lines[line_no]
             match = expect.search(line, col_no)

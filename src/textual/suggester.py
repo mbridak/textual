@@ -1,12 +1,18 @@
+"""
+
+Contains the `Suggester` class, used by the [Input](/widgets/input) widget.
+
+"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Iterable
 
-from ._cache import LRUCache
-from .dom import DOMNode
-from .message import Message
+from textual.cache import LRUCache
+from textual.dom import DOMNode
+from textual.message import Message
 
 
 @dataclass

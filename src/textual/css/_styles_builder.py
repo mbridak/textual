@@ -1,40 +1,43 @@
 from __future__ import annotations
 
-from functools import lru_cache
-from typing import Iterable, NoReturn, Sequence, cast
+from typing import Iterable, NoReturn, cast
 
 import rich.repr
 
-from .._border import BorderValue, normalize_border_value
-from .._duration import _duration_as_seconds
-from .._easing import EASING
-from ..color import Color, ColorParseError
-from ..geometry import Spacing, SpacingDimensions, clamp
-from ..suggestions import get_suggestion
-from ._error_tools import friendly_list
-from ._help_renderables import HelpText
-from ._help_text import (
+from textual._border import BorderValue, normalize_border_value
+from textual._cells import cell_len
+from textual._duration import _duration_as_seconds
+from textual._easing import EASING
+from textual.color import TRANSPARENT, Color, ColorParseError
+from textual.css._error_tools import friendly_list
+from textual.css._help_renderables import HelpText
+from textual.css._help_text import (
     align_help_text,
     border_property_help_text,
     color_property_help_text,
     dock_property_help_text,
+    expand_help_text,
     fractional_property_help_text,
     integer_help_text,
+    keyline_help_text,
     layout_property_help_text,
     offset_property_help_text,
     offset_single_axis_help_text,
+    position_help_text,
     property_invalid_value_help_text,
     scalar_help_text,
     scrollbar_size_property_help_text,
     scrollbar_size_single_axis_help_text,
     spacing_invalid_value_help_text,
     spacing_wrong_number_of_values_help_text,
+    split_property_help_text,
     string_enum_help_text,
     style_flags_property_help_text,
     table_rows_or_columns_help_text,
     text_align_help_text,
 )
-from .constants import (
+from textual.css.constants import (
+    HATCHES,
     VALID_ALIGN_HORIZONTAL,
     VALID_ALIGN_VERTICAL,
     VALID_BORDER,
@@ -42,16 +45,24 @@ from .constants import (
     VALID_CONSTRAIN,
     VALID_DISPLAY,
     VALID_EDGE,
+    VALID_EXPAND,
+    VALID_HATCH,
+    VALID_KEYLINE,
     VALID_OVERFLOW,
     VALID_OVERLAY,
+    VALID_POINTER,
+    VALID_POSITION,
     VALID_SCROLLBAR_GUTTER,
+    VALID_SCROLLBAR_VISIBILITY,
     VALID_STYLE_FLAGS,
     VALID_TEXT_ALIGN,
+    VALID_TEXT_OVERFLOW,
+    VALID_TEXT_WRAP,
     VALID_VISIBILITY,
 )
-from .errors import DeclarationError, StyleValueError
-from .model import Declaration
-from .scalar import (
+from textual.css.errors import DeclarationError, StyleValueError
+from textual.css.model import Declaration
+from textual.css.scalar import (
     Scalar,
     ScalarError,
     ScalarOffset,
@@ -59,23 +70,21 @@ from .scalar import (
     Unit,
     percentage_string_to_float,
 )
-from .styles import Styles
-from .tokenize import Token
-from .transition import Transition
-from .types import BoxSizing, Display, EdgeType, Overflow, Visibility
-
-
-def _join_tokens(tokens: Iterable[Token], joiner: str = "") -> str:
-    """Convert tokens into a string by joining their values
-
-    Args:
-        tokens: Tokens to join
-        joiner: String to join on.
-
-    Returns:
-        The tokens, joined together to form a string.
-    """
-    return joiner.join(token.value for token in tokens)
+from textual.css.styles import Styles
+from textual.css.tokenize import Token
+from textual.css.transition import Transition
+from textual.css.types import (
+    BoxSizing,
+    Display,
+    EdgeType,
+    Overflow,
+    ScrollbarVisibility,
+    TextOverflow,
+    TextWrap,
+    Visibility,
+)
+from textual.geometry import Spacing, SpacingDimensions, clamp
+from textual.suggestions import get_suggestion
 
 
 class StylesBuilder:
@@ -97,9 +106,17 @@ class StylesBuilder:
         raise DeclarationError(name, token, message)
 
     def add_declaration(self, declaration: Declaration) -> None:
-        if not declaration.tokens:
+        if not declaration.name:
             return
         rule_name = declaration.name.replace("-", "_")
+
+        if not declaration.tokens:
+            self.error(
+                rule_name,
+                declaration.token,
+                f"Missing property value for '{declaration.name}:'",
+            )
+
         process_method = getattr(self, f"process_{rule_name}", None)
 
         if process_method is None:
@@ -122,25 +139,19 @@ class StylesBuilder:
         if important:
             tokens = tokens[:-1]
             self.styles.important.add(rule_name)
+
+        # Check for special token(s)
+        if tokens[0].name == "token":
+            value = tokens[0].value
+            if value == "initial":
+                self.styles._rules[rule_name] = None
+                return
         try:
             process_method(declaration.name, tokens)
         except DeclarationError:
             raise
         except Exception as error:
             self.error(declaration.name, declaration.token, str(error))
-
-    @lru_cache(maxsize=None)
-    def _get_processable_rule_names(self) -> Sequence[str]:
-        """
-        Returns the list of CSS properties we can manage -
-        i.e. the ones for which we have a `process_[property name]` method
-
-        Returns:
-            All the "Python-ised" CSS property names this class can handle.
-
-        Example: ("width", "background", "offset_x", ...)
-        """
-        return [attr[8:] for attr in dir(self) if attr.startswith("process_")]
 
     def _process_enum_multiple(
         self, name: str, tokens: list[Token], valid_values: set[str], count: int
@@ -259,7 +270,7 @@ class StylesBuilder:
 
         Args:
             prefix: The prefix of the style.
-            siffixes: The suffixes to distribute amongst.
+            suffixes: The suffixes to distribute amongst.
 
         A number of styles can be set with the 'prefix' of the style,
         providing the values as a series of parameters; or they can be set
@@ -355,6 +366,52 @@ class StylesBuilder:
             else:
                 string_enum_help_text(
                     "visibility", valid_values=list(VALID_VISIBILITY), context="css"
+                )
+
+    def process_text_wrap(self, name: str, tokens: list[Token]) -> None:
+        for token in tokens:
+            name, value, _, _, location, _ = token
+            if name == "token":
+                value = value.lower()
+                if value in VALID_TEXT_WRAP:
+                    self.styles._rules["text_wrap"] = cast(TextWrap, value)
+                else:
+                    self.error(
+                        name,
+                        token,
+                        string_enum_help_text(
+                            "text-wrap",
+                            valid_values=list(VALID_TEXT_WRAP),
+                            context="css",
+                        ),
+                    )
+            else:
+                string_enum_help_text(
+                    "text-wrap", valid_values=list(VALID_TEXT_WRAP), context="css"
+                )
+
+    def process_text_overflow(self, name: str, tokens: list[Token]) -> None:
+        for token in tokens:
+            name, value, _, _, location, _ = token
+            if name == "token":
+                value = value.lower()
+                if value in VALID_TEXT_OVERFLOW:
+                    self.styles._rules["text_overflow"] = cast(TextOverflow, value)
+                else:
+                    self.error(
+                        name,
+                        token,
+                        string_enum_help_text(
+                            "text-overflow",
+                            valid_values=list(VALID_TEXT_OVERFLOW),
+                            context="css",
+                        ),
+                    )
+            else:
+                string_enum_help_text(
+                    "text-overflow",
+                    valid_values=list(VALID_TEXT_OVERFLOW),
+                    context="css",
                 )
 
     def _process_fractional(self, name: str, tokens: list[Token]) -> None:
@@ -543,6 +600,45 @@ class StylesBuilder:
     def process_outline_left(self, name: str, tokens: list[Token]) -> None:
         self._process_outline("left", name, tokens)
 
+    def process_keyline(self, name: str, tokens: list[Token]) -> None:
+        if not tokens:
+            return
+        if len(tokens) > 3:
+            self.error(name, tokens[0], keyline_help_text())
+        keyline_style = "none"
+        keyline_color = Color.parse("green")
+        keyline_alpha = 1.0
+        for token in tokens:
+            if token.name == "color":
+                try:
+                    keyline_color = Color.parse(token.value)
+                except Exception as error:
+                    self.error(
+                        name,
+                        token,
+                        color_property_help_text(
+                            name, context="css", error=error, value=token.value
+                        ),
+                    )
+            elif token.name == "token":
+                try:
+                    keyline_color = Color.parse(token.value)
+                except Exception:
+                    keyline_style = token.value
+                    if keyline_style not in VALID_KEYLINE:
+                        self.error(name, token, keyline_help_text())
+
+            elif token.name == "scalar":
+                alpha_scalar = Scalar.parse(token.value)
+                if alpha_scalar.unit != Unit.PERCENT:
+                    self.error(name, token, "alpha must be given as a percentage.")
+                keyline_alpha = alpha_scalar.value / 100.0
+
+        self.styles._rules["keyline"] = (
+            keyline_style,
+            keyline_color.multiply_alpha(keyline_alpha),
+        )
+
     def process_offset(self, name: str, tokens: list[Token]) -> None:
         def offset_error(name: str, token: Token) -> None:
             self.error(name, token, offset_property_help_text(context="css"))
@@ -589,8 +685,19 @@ class StylesBuilder:
             x = self.styles.offset.x
             self.styles._rules["offset"] = ScalarOffset(x, y)
 
+    def process_position(self, name: str, tokens: list[Token]):
+        if not tokens:
+            return
+        if len(tokens) != 1:
+            self.error(name, tokens[0], offset_single_axis_help_text(name))
+        else:
+            token = tokens[0]
+            if token.value not in VALID_POSITION:
+                self.error(name, tokens[0], position_help_text(name))
+            self.styles._rules["position"] = token.value
+
     def process_layout(self, name: str, tokens: list[Token]) -> None:
-        from ..layouts.factory import MissingLayout, get_layout
+        from textual.layouts.factory import MissingLayout, get_layout
 
         if tokens:
             if len(tokens) != 1:
@@ -637,10 +744,16 @@ class StylesBuilder:
                     self.error(
                         name,
                         token,
-                        color_property_help_text(name, context="css", error=error),
+                        color_property_help_text(
+                            name, context="css", error=error, value=token.value
+                        ),
                     )
             else:
-                self.error(name, token, color_property_help_text(name, context="css"))
+                self.error(
+                    name,
+                    token,
+                    color_property_help_text(name, context="css", value=token.value),
+                )
 
         if color is not None or alpha is not None:
             if alpha is not None:
@@ -649,6 +762,7 @@ class StylesBuilder:
 
     process_tint = process_color
     process_background = process_color
+    process_background_tint = process_color
     process_scrollbar_color = process_color
     process_scrollbar_color_hover = process_color
     process_scrollbar_color_active = process_color
@@ -657,10 +771,17 @@ class StylesBuilder:
     process_scrollbar_background_hover = process_color
     process_scrollbar_background_active = process_color
 
+    def process_scrollbar_visibility(self, name: str, tokens: list[Token]) -> None:
+        """Process scrollbar visibility rules."""
+        self.styles._rules["scrollbar_visibility"] = cast(
+            ScrollbarVisibility,
+            self._process_enum(name, tokens, VALID_SCROLLBAR_VISIBILITY),
+        )
+
     process_link_color = process_color
     process_link_background = process_color
-    process_link_hover_color = process_color
-    process_link_hover_background = process_color
+    process_link_color_hover = process_color
+    process_link_background_hover = process_color
 
     process_border_title_color = process_color
     process_border_title_background = process_color
@@ -681,7 +802,7 @@ class StylesBuilder:
         self.styles._rules[name.replace("-", "_")] = style_definition  # type: ignore
 
     process_link_style = process_text_style
-    process_link_hover_style = process_text_style
+    process_link_style_hover = process_text_style
 
     process_border_title_style = process_text_style
     process_border_subtitle_style = process_text_style
@@ -711,8 +832,22 @@ class StylesBuilder:
                 dock_property_help_text(name, context="css"),
             )
 
-        dock = tokens[0].value
-        self.styles._rules["dock"] = dock
+        dock_value = tokens[0].value
+        self.styles._rules["dock"] = dock_value
+
+    def process_split(self, name: str, tokens: list[Token]) -> None:
+        if not tokens:
+            return
+
+        if len(tokens) > 1 or tokens[0].value not in VALID_EDGE:
+            self.error(
+                name,
+                tokens[0],
+                split_property_help_text(name, context="css"),
+            )
+
+        split_value = tokens[0].value
+        self.styles._rules["split"] = split_value
 
     def process_layer(self, name: str, tokens: list[Token]) -> None:
         if len(tokens) > 1:
@@ -722,8 +857,8 @@ class StylesBuilder:
     def process_layers(self, name: str, tokens: list[Token]) -> None:
         layers: list[str] = []
         for token in tokens:
-            if token.name != "token":
-                self.error(name, token, "{token.name} not expected here")
+            if token.name not in {"token", "string"}:
+                self.error(name, token, f"{token.name} not expected here")
             layers.append(token.value)
         self.styles._rules["layers"] = tuple(layers)
 
@@ -876,11 +1011,7 @@ class StylesBuilder:
                 scrollbar_size_error(name, token2)
 
             horizontal = int(token1.value)
-            if horizontal == 0:
-                scrollbar_size_error(name, token1)
             vertical = int(token2.value)
-            if vertical == 0:
-                scrollbar_size_error(name, token2)
             self.styles._rules["scrollbar_size_horizontal"] = horizontal
             self.styles._rules["scrollbar_size_vertical"] = vertical
             self._distribute_importance("scrollbar_size", ("horizontal", "vertical"))
@@ -895,8 +1026,6 @@ class StylesBuilder:
             if token.name != "number" or not token.value.isdigit():
                 self.error(name, token, scrollbar_size_single_axis_help_text(name))
             value = int(token.value)
-            if value == 0:
-                self.error(name, token, scrollbar_size_single_axis_help_text(name))
             self.styles._rules["scrollbar_size_vertical"] = value
 
     def process_scrollbar_size_horizontal(self, name: str, tokens: list[Token]) -> None:
@@ -909,8 +1038,6 @@ class StylesBuilder:
             if token.name != "number" or not token.value.isdigit():
                 self.error(name, token, scrollbar_size_single_axis_help_text(name))
             value = int(token.value)
-            if value == 0:
-                self.error(name, token, scrollbar_size_single_axis_help_text(name))
             self.styles._rules["scrollbar_size_horizontal"] = value
 
     def _process_grid_rows_or_columns(self, name: str, tokens: list[Token]) -> None:
@@ -921,6 +1048,8 @@ class StylesBuilder:
                 scalars.append(Scalar.from_number(float(token.value)))
             elif token.name == "scalar":
                 scalars.append(Scalar.parse(token.value, percent_unit=percent_unit))
+            elif token.name == "token" and token.value == "auto":
+                scalars.append(Scalar.parse("auto"))
             else:
                 self.error(
                     name,
@@ -952,6 +1081,7 @@ class StylesBuilder:
     process_row_span = _process_integer
     process_grid_size_columns = _process_integer
     process_grid_size_rows = _process_integer
+    process_line_pad = _process_integer
 
     def process_grid_gutter(self, name: str, tokens: list[Token]) -> None:
         if not tokens:
@@ -1018,6 +1148,28 @@ class StylesBuilder:
             self.styles._rules[name] = value  # type: ignore
 
     def process_constrain(self, name: str, tokens: list[Token]) -> None:
+        if len(tokens) == 1:
+            try:
+                value = self._process_enum(name, tokens, VALID_CONSTRAIN)
+            except StyleValueError:
+                self.error(
+                    name,
+                    tokens[0],
+                    string_enum_help_text(name, VALID_CONSTRAIN, context="css"),
+                )
+            else:
+                self.styles._rules["constrain_x"] = value  # type: ignore
+                self.styles._rules["constrain_y"] = value  # type: ignore
+        elif len(tokens) == 2:
+            constrain_x, constrain_y = self._process_enum_multiple(
+                name, tokens, VALID_CONSTRAIN, 2
+            )
+            self.styles._rules["constrain_x"] = constrain_x  # type: ignore
+            self.styles._rules["constrain_y"] = constrain_y  # type: ignore
+        else:
+            self.error(name, tokens[0], "one or two values expected here")
+
+    def process_constrain_x(self, name: str, tokens: list[Token]) -> None:
         try:
             value = self._process_enum(name, tokens, VALID_CONSTRAIN)
         except StyleValueError:
@@ -1028,6 +1180,122 @@ class StylesBuilder:
             )
         else:
             self.styles._rules[name] = value  # type: ignore
+
+    def process_constrain_y(self, name: str, tokens: list[Token]) -> None:
+        try:
+            value = self._process_enum(name, tokens, VALID_CONSTRAIN)
+        except StyleValueError:
+            self.error(
+                name,
+                tokens[0],
+                string_enum_help_text(name, VALID_CONSTRAIN, context="css"),
+            )
+        else:
+            self.styles._rules[name] = value  # type: ignore
+
+    def process_hatch(self, name: str, tokens: list[Token]) -> None:
+        if not tokens:
+            return
+        character: str | None = None
+        color = TRANSPARENT
+        opacity = 1.0
+
+        if len(tokens) == 1 and tokens[0].value == "none":
+            self.styles._rules[name] = "none"
+            return
+
+        if len(tokens) not in (2, 3):
+            self.error(name, tokens[0], "2 or 3 values expected here")
+
+        character_token, color_token, *opacity_tokens = tokens
+
+        if character_token.name == "token":
+            if character_token.value not in VALID_HATCH:
+                self.error(
+                    name,
+                    tokens[0],
+                    string_enum_help_text(name, VALID_HATCH, context="css"),
+                )
+            character = HATCHES[character_token.value]
+        elif character_token.name == "string":
+            character = character_token.value[1:-1]
+            if len(character) != 1:
+                self.error(
+                    name,
+                    character_token,
+                    f"Hatch type requires a string of length 1; got {character_token.value}",
+                )
+            if cell_len(character) != 1:
+                self.error(
+                    name,
+                    character_token,
+                    f"Hatch type requires a string with a *cell length* of 1; got {character_token.value}",
+                )
+
+        if color_token.name in ("color", "token"):
+            try:
+                color = Color.parse(color_token.value)
+            except Exception as error:
+                self.error(
+                    name,
+                    color_token,
+                    color_property_help_text(
+                        name, context="css", error=error, value=color_token.value
+                    ),
+                )
+        else:
+            self.error(
+                name, color_token, f"Expected a color; found {color_token.value!r}"
+            )
+
+        if opacity_tokens:
+            opacity_token = opacity_tokens[0]
+            if opacity_token.name == "scalar":
+                opacity_scalar = opacity = Scalar.parse(opacity_token.value)
+                if opacity_scalar.unit != Unit.PERCENT:
+                    self.error(
+                        name,
+                        opacity_token,
+                        "hatch alpha must be given as a percentage.",
+                    )
+                opacity = clamp(opacity_scalar.value / 100.0, 0, 1.0)
+            else:
+                self.error(
+                    name,
+                    opacity_token,
+                    f"expected a percentage here; found {opacity_token.value!r}",
+                )
+
+        self.styles._rules[name] = (character or " ", color.multiply_alpha(opacity))
+
+    def process_expand(self, name: str, tokens: list[Token]):
+        if not tokens:
+            return
+        if len(tokens) != 1:
+            self.error(name, tokens[0], offset_single_axis_help_text(name))
+        else:
+            token = tokens[0]
+            if token.value not in VALID_EXPAND:
+                self.error(name, tokens[0], expand_help_text(name))
+            self.styles._rules["expand"] = token.value
+
+    def process_pointer(self, name: str, tokens: list[Token]) -> None:
+        for token in tokens:
+            name, value, _, _, location, _ = token
+            if name == "token":
+                value = value.lower()
+                if value in VALID_POINTER:
+                    self.styles._rules["pointer"] = value
+                else:
+                    self.error(
+                        name,
+                        token,
+                        string_enum_help_text(
+                            "pointer",
+                            valid_values=list(VALID_POINTER),
+                            context="css",
+                        ),
+                    )
 
     def _get_suggested_property_name_for_rule(self, rule_name: str) -> str | None:
         """
@@ -1042,4 +1310,7 @@ class StylesBuilder:
 
         Example: returns "background" for rule_name "bkgrund", "offset_x" for "ofset_x"
         """
-        return get_suggestion(rule_name, self._get_processable_rule_names())
+        processable_rules_name = [
+            attr[8:] for attr in dir(self) if attr.startswith("process_")
+        ]
+        return get_suggestion(rule_name, processable_rules_name)

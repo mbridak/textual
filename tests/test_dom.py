@@ -97,19 +97,19 @@ def test_inherited_bindings():
         BINDINGS = [("e", "e", "e")]
 
     a = A()
-    assert list(a._bindings.keys.keys()) == ["a"]
+    assert list(a._bindings.key_to_bindings.keys()) == ["a"]
 
     b = B()
-    assert list(b._bindings.keys.keys()) == ["a", "b"]
+    assert list(b._bindings.key_to_bindings.keys()) == ["a", "b"]
 
     c = C()
-    assert list(c._bindings.keys.keys()) == ["c"]
+    assert list(c._bindings.key_to_bindings.keys()) == ["c"]
 
     d = D()
-    assert not list(d._bindings.keys.keys())
+    assert not list(d._bindings.key_to_bindings.keys())
 
     e = E()
-    assert list(e._bindings.keys.keys()) == ["e"]
+    assert list(e._bindings.key_to_bindings.keys()) == ["e"]
 
 
 def test__get_default_css():
@@ -150,8 +150,8 @@ def test__get_default_css():
     assert c_css[0][2] == d_css[0][2] + 1 == 0
 
     # The CSS on the stack is the correct one.
-    assert e_css[0][1:] == ("E", 0)
-    assert e_css[1][1:] == ("C", -2)
+    assert e_css[0][1:] == ("E", 0, "E")
+    assert e_css[1][1:] == ("C", -2, "C")
 
 
 def test_component_classes_inheritance():
@@ -259,3 +259,24 @@ def test_walk_children_with_self_breadth(search):
     ]
 
     assert children == ["f", "e", "d", "c", "b", "a"]
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    [
+        " bad",
+        "  terrible  ",
+        "worse!  ",
+        "&ampersand",
+        "amper&sand",
+        "ampersand&",
+        "2_leading_digits",
+        "água",  # water
+        "cão",  # dog
+        "@'/.23",
+    ],
+)
+def test_id_validation(identifier: str):
+    """Regression tests for https://github.com/Textualize/textual/issues/3954."""
+    with pytest.raises(BadIdentifier):
+        DOMNode(id=identifier)

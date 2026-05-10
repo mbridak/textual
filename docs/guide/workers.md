@@ -10,6 +10,9 @@ There are many interesting uses for Textual which require reading data from an i
 When an app requests data from the network it is important that it doesn't prevent the user interface from updating.
 In other words, the requests should be concurrent (happen at the same time) as the UI updates.
 
+This is also true for anything that could take a significant time (more than a few milliseconds) to complete.
+For instance, reading from a [subprocess](https://docs.python.org/3/library/asyncio-subprocess.html#asyncio-subprocess) or doing compute heavy work.
+
 Managing this concurrency is a tricky topic, in any language or framework.
 Even for experienced developers, there are gotchas which could make your app lock up or behave oddly.
 Textual's Worker API makes concurrency far less error prone and easier to reason about.
@@ -26,10 +29,10 @@ The following app uses [httpx](https://www.python-httpx.org/) to get the current
     --8<-- "docs/examples/guide/workers/weather01.py"
     ```
 
-=== "weather.css"
+=== "weather.tcss"
 
-    ```sass title="weather.css"
-    --8<-- "docs/examples/guide/workers/weather.css"
+    ```css title="weather.tcss"
+    --8<-- "docs/examples/guide/workers/weather.tcss"
     ```
 
 === "Output"
@@ -97,7 +100,7 @@ You can also create workers which will *not* immediately exit on exception, by s
 
 ### Worker lifetime
 
-Workers are managed by a single [WorkerManager][textual._worker_manager.WorkerManager] instance, which you can access via `app.workers`.
+Workers are managed by a single [WorkerManager][textual.worker_manager.WorkerManager] instance, which you can access via `app.workers`.
 This is a container-like object which you iterate over to see your active workers.
 
 Workers are tied to the DOM node (widget, screen, or app) where they are created.
@@ -150,15 +153,15 @@ This works well if you are using an async API like `httpx`, but if your API does
 You can create threads by setting `thread=True` on the `run_worker` method or the `work` decorator.
 The API for thread workers is identical to async workers, but there are a few differences you need to be aware of when writing code for thread workers.
 
-The first difference is that you should avoid calling methods on your UI directly, or setting reactive variables.
-You can work around this with the [App.call_from_thread][textual.app.App.call_from_thread] method which schedules a call in the main thread.
+The first difference is that you should **avoid calling methods on your UI directly** from a threaded worker, or setting reactive variables.
+You can work around this with the [App.call_from_thread][textual.app.App.call_from_thread] method which runs your function from the main thread.
 
 The second difference is that you can't cancel threads in the same way as coroutines, but you *can* manually check if the worker was cancelled.
 
 Let's demonstrate thread workers by replacing `httpx` with `urllib.request` (in the standard library).
 The `urllib` module is not async aware, so we will need to use threads:
 
-```python title="weather05.py" hl_lines="1 26-43"
+```python title="weather05.py" hl_lines="1-2 27-44"
 --8<-- "docs/examples/guide/workers/weather05.py"
 ```
 
@@ -173,6 +176,6 @@ Note the use of [get_current_worker][textual.worker.get_current_worker] which th
 
 #### Posting messages
 
-Most Textual functions are not thread-safe which means you will need to use `call_from_thread` to run them from a thread worker.
+Most Textual functions are not thread-safe which means you will need to use [call_from_thread][textual.app.App.call_from_thread] to run them from a thread worker.
 An exception would be [post_message][textual.widget.Widget.post_message] which *is* thread-safe.
 If your worker needs to make multiple updates to the UI, it is a good idea to send [custom messages](./events.md) and let the message handler update the state of the UI.

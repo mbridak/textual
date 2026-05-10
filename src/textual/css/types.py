@@ -4,10 +4,9 @@ from typing import Tuple
 
 from typing_extensions import Literal
 
-from ..color import Color
+from textual.color import Color
 
-Edge = Literal["top", "right", "bottom", "left"]
-DockEdge = Literal["top", "right", "bottom", "left", ""]
+DockEdge = Literal["none", "top", "right", "bottom", "left"]
 EdgeType = Literal[
     "",
     "ascii",
@@ -17,6 +16,7 @@ EdgeType = Literal[
     "round",
     "solid",
     "thick",
+    "block",
     "double",
     "dashed",
     "heavy",
@@ -25,6 +25,7 @@ EdgeType = Literal[
     "hkey",
     "vkey",
     "tall",
+    "tab",
     "panel",
     "wide",
 ]
@@ -37,8 +38,55 @@ BoxSizing = Literal["border-box", "content-box"]
 Overflow = Literal["scroll", "hidden", "auto"]
 EdgeStyle = Tuple[EdgeType, Color]
 TextAlign = Literal["left", "start", "center", "right", "end", "justify"]
-Constrain = Literal["none", "x", "y", "both"]
+Constrain = Literal["none", "inflect", "inside"]
 Overlay = Literal["none", "screen"]
+Position = Literal["relative", "absolute"]
+PointerShape = Literal[
+    "alias",
+    "cell",
+    "copy",
+    "crosshair",
+    "default",
+    "e-resize",
+    "ew-resize",
+    "grab",
+    "grabbing",
+    "help",
+    "move",
+    "n-resize",
+    "ne-resize",
+    "nesw-resize",
+    "no-drop",
+    "not-allowed",
+    "ns-resize",
+    "nw-resize",
+    "nwse-resize",
+    "pointer",
+    "progress",
+    "s-resize",
+    "se-resize",
+    "sw-resize",
+    "text",
+    "vertical-text",
+    "w-resize",
+    "wait",
+    "zoom-in",
+    "zoom-out",
+]
+
+TextWrap = Literal["wrap", "nowrap"]
+TextOverflow = Literal["clip", "fold", "ellipsis"]
+Expand = Literal["greedy", "expand"]
+ScrollbarVisibility = Literal["visible", "hidden"]
 
 Specificity3 = Tuple[int, int, int]
 Specificity6 = Tuple[int, int, int, int, int, int]
+
+CSSLocation = Tuple[str, str]
+"""Represents the definition location of a piece of CSS code.
+
+The first element of the tuple is the file path from where the CSS was read.
+If the CSS was read from a Python source file, the second element contains the class
+variable from where the CSS was read (e.g., "Widget.DEFAULT_CSS"), otherwise it's an
+empty string.
+"""
